@@ -5,6 +5,7 @@
 //   top|<TOPSHP>|<COLOUR>            voyants
 //   light|<COLOUR>                   feux (flamme)
 //   warrow|<couleur>                 flèche de vent
+//   carrow|<couleur>                 flèche de courant
 //   wreck, rock, obstn, isodgr, notice, harbour, underline, boat
 // Ils sont générés sur l'événement « styleimagemissing » de MapLibre.
 import type { Map as MlMap } from 'maplibre-gl';
@@ -177,6 +178,17 @@ function windArrow(colour: string) {
   });
 }
 
+// Flèche de courant : fine, à pointe ouverte, pour la distinguer du vent (pointe vers le nord = porte au nord)
+function currentArrow(colour: string) {
+  return make(20, 34, (c) => {
+    c.strokeStyle = 'rgba(255,255,255,0.9)'; c.lineWidth = 4.5;
+    const path = () => { c.beginPath(); c.moveTo(10, 32); c.lineTo(10, 3); c.moveTo(3.5, 10); c.lineTo(10, 3); c.lineTo(16.5, 10); };
+    path(); c.stroke();
+    c.strokeStyle = colour; c.lineWidth = 2.2;
+    path(); c.stroke();
+  });
+}
+
 export function registerSymbols(map: MlMap) {
   map.on('styleimagemissing', (e: { id: string }) => {
     const id = e.id;
@@ -188,6 +200,7 @@ export function registerSymbols(map: MlMap) {
     else if (kind === 'top') img = topmark(a, b);
     else if (kind === 'light') img = light(a);
     else if (kind === 'warrow') img = windArrow(a || INK);
+    else if (kind === 'carrow') img = currentArrow(a || INK);
     else if (STATIC[kind]) img = STATIC[kind]();
     if (!img) return;
     map.addImage(id, img, {

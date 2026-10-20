@@ -9,6 +9,7 @@ export interface Settings {
   soundings: boolean;
   lookAheadMin: number; // anticipation de l'alarme hauts-fonds (minutes)
   windLayer: boolean;   // couche optionnelle : prévision de vent
+  currentLayer: boolean; // couche optionnelle : courants de marée estimés
 }
 
 export const DEFAULTS: Settings = {
@@ -20,6 +21,7 @@ export const DEFAULTS: Settings = {
   soundings: true,
   lookAheadMin: 2,
   windLayer: false,
+  currentLayer: false,
 };
 
 const KEY = 'zn.settings';

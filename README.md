@@ -31,6 +31,9 @@ uv run python -I src/fetch_ienc.py --area zeeland --dest data          # ~47 Mo,
 uv run python -I -W ignore src/enc2pmtiles.py data/zeeland \
     -o ../public/tiles/zeeland.pmtiles --meta data/zeeland.json         # ~2 min 30, ~50 Mo
 uv run python -I src/inspect_cells.py data/zeeland                      # inventaire : échelles, emprise, zéro
+uv run python -I src/tides.py -o ../public/tiles/tides.json             # marées officielles (30 jours)
+uv run python -I -W ignore src/currents.py data/zeeland \
+    --tides ../public/tiles/tides.json -o ../public/tiles/currents.json # grille de courants estimés (~2 min)
 ```
 
 `enc2pmtiles.py` écrit aussi `zeeland.json` (manifeste : taille, empreinte, date d'édition) que l'app lit pour afficher l'édition et proposer les mises à jour.
@@ -61,7 +64,11 @@ Le GPS du navigateur exige HTTPS (ou `localhost`). Pour tester sur un téléphon
 ## Couches optionnelles
 
 - **Vent** (bouton vent de la barre d'outils) : prévision KNMI HARMONIE via Open-Meteo (CC-BY 4.0), grille de 0,1° sur la Zélande, interpolée pour afficher des flèches à tout zoom ; bandeau avec force, rafales, Beaufort, tendance sur 3 h et allure/amure d'après le cap fond. La dernière prévision est gardée sur l'appareil (consultation hors-ligne). Pas de flèche hors de la grille de prévision.
-- **Courants** : pas encore. Le modèle marin d'Open-Meteo (~8 km) ne résout pas les bras de mer ; piste retenue : Copernicus Marine North West Shelf (~1,5 km), qui demande un compte.
+- **Courants de marée** (bouton vagues) : **estimation indicative** façon atlas de courants, pas un modèle hydrodynamique.
+  - `pipeline/src/tides.py` : marée astronomique officielle Rijkswaterstaat (Waterwebservices DDL 2.0, `WATHTE` / `astronomisch`) de 8 stations (Westkapelle, Vlissingen, Terneuzen, Hansweert, Roompot, Stavenisse, Yerseke, Krammer) sur 30 jours → pleines/basses mers et marnage moyen (`tides.json`, recalculé chaque jour par la CI).
+  - `pipeline/src/currents.py` : grille d'environ 900 m sur les eaux reliées à la mer sans ouvrage (sas, portes, barrages retirés : Veerse Meer, Grevelingen, Volkerak-Zoommeer et canaux exclus), direction du flot le long de l'axe des voies navigables orientée vers l'amont de l'onde de marée, vitesse maximale par bassin modulée par la profondeur, réduite hors chenal et dans les ports (`currents.json`).
+  - App : flot de l'étale de basse mer à l'étale de pleine mer (étale ≈ 35 min après PM/BM locale), demi-sinusoïde entre deux étales, modulée par le marnage du jour (vives-eaux / mortes-eaux) ; bandeau avec courant au bateau, prochaine étale, prochaines PM/BM. Données gardées pour le hors-ligne.
+- Vent et courant partagent le curseur horaire (−6 h à +72 h, « Maintenant » suit l'heure courante).
 
 ## Mobile
 

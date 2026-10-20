@@ -100,6 +100,29 @@ export async function downloadChart(m: Manifest, onProgress: (f: number) => void
   for (const req of await cache.keys()) if (req.url !== new URL(url).href) await cache.delete(req); // une seule édition gardée
 }
 
+const DATA_CACHE = 'zn-data-v1';
+
+/**
+ * Données annexes publiées à côté de la carte (tides.json, currents.json) : réseau d'abord (mises à
+ * jour quotidiennes), copie gardée dans le cache pour l'usage hors-ligne.
+ */
+export async function loadData<T>(name: string): Promise<T | null> {
+  const url = `${CHART_BASE}${name}`;
+  try {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error(String(res.status));
+    await (await caches.open(DATA_CACHE)).put(url, res.clone());
+    return (await res.json()) as T;
+  } catch {
+    try {
+      const cached = await (await caches.open(DATA_CACHE)).match(url);
+      return cached ? ((await cached.json()) as T) : null;
+    } catch {
+      return null;
+    }
+  }
+}
+
 export async function deleteOfflineChart() {
   await caches.delete(CACHE);
   localStorage.removeItem(OFFLINE_KEY);

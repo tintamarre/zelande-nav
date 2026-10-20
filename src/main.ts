@@ -4,11 +4,12 @@ import { Protocol, type PMTiles } from 'pmtiles';
 import { registerSW } from 'virtual:pwa-register';
 import './ui.css';
 import { Boat, type Fix, formatLatLon } from './boat';
-import { deleteOfflineChart, downloadChart, formatEdition, type Manifest, offlineManifest, openChart, remoteManifest } from './chart';
+import { deleteOfflineChart, downloadChart, formatEdition, loadData, type Manifest, offlineManifest, openChart, remoteManifest } from './chart';
 import { describe, type Props } from './s57';
 import { type Settings, loadSettings, safetyContour, safetyDepth, saveSettings } from './settings';
 import { buildStyle } from './style';
 import { beaufort, compass, inForecast, loadWind, nearestHour, pointOfSail, type WindForecast, windAt, windColourFor, windScreenGrid } from './weather';
+import { CURRENT_SCALE, CURRENT_SCALE_NIGHT, type CurrentGrid, currentAt, currentScreenFeatures, nearestPoint, nextTides, type Tides } from './currents';
 import { registerSymbols } from './symbols';
 import { type Track, type TrackPoint, deleteTrack, destination, exportGpx, listTracks, saveTrack, trackNm } from './track';
 
@@ -52,95 +53,142 @@ function applyStyle() {
   map.setStyle(buildStyle(settings, sourceUrl, GLYPHS), { diff: sourceUrl === styledSource });
   styledSource = sourceUrl;
   // Les données GeoJSON (bateau, trace) sont remises après un changement de style
-  map.once('styledata', () => { renderTrack(); renderWind(); if (boat.active && boat.last) renderBoat(boat.last); });
+  map.once('styledata', () => { renderTrack(); renderLayers(); if (boat.active && boat.last) renderBoat(boat.last); });
 }
 
-// ---------- couche vent ----------
+// ---------- couches vent et courant : échelle de temps commune ----------
 let wind: WindForecast | null = null;
-let windHour = -1;
-let windLive = true;   // l'heure affichée suit l'heure courante tant que le curseur n'a pas été déplacé
-let windToasted = false;
+let tides: Tides | null = null;
+let currentGrid: CurrentGrid | null = null;
+let live = true;   // « maintenant » : suit l'heure courante tant que le curseur n'a pas été déplacé
+let offsetH = 0;   // décalage en heures par rapport à l'heure ronde courante
+const toasted = new Set<string>();
 const timeRange = $<HTMLInputElement>('time-range');
+const hourNow = () => Math.floor(Date.now() / 3600_000) * 3600_000;
+const viewTime = () => (live ? Date.now() : hourNow() + offsetH * 3600_000);
+const toastOnce = (key: string, msg: string) => { if (!toasted.has(key)) toast(msg, 6000); toasted.add(key); };
 
-async function updateWind(force = false) {
-  $('windpanel').hidden = !settings.windLayer;
-  $('wind-btn').classList.toggle('on', settings.windLayer);
-  $('wind-btn').setAttribute('aria-pressed', String(settings.windLayer));
-  if (!settings.windLayer) return;
-  const fc = await loadWind(force);
-  if (!fc) {
-    if (!windToasted) toast('Prévision de vent indisponible (pas de connexion ni de prévision gardée).');
-    windToasted = true;
-    return;
+async function updateLayers(force = false) {
+  for (const [btn, on] of [['wind-btn', settings.windLayer], ['current-btn', settings.currentLayer]] as const) {
+    $(btn).classList.toggle('on', on);
+    $(btn).setAttribute('aria-pressed', String(on));
   }
-  if (windLive || windHour < 0 || windHour >= fc.times.length) windHour = nearestHour(fc, Date.now());
-  wind = fc;
-  timeRange.max = String(fc.times.length - 1);
-  timeRange.value = String(windHour);
-  renderWind();
+  $('envpanel').hidden = !settings.windLayer && !settings.currentLayer;
+  $('wind-row').hidden = !settings.windLayer;
+  $('current-row').hidden = !settings.currentLayer;
+  if (settings.windLayer) {
+    wind = (await loadWind(force)) ?? wind;
+    if (!wind) toastOnce('wind', 'Prévision de vent indisponible (pas de connexion ni de prévision gardée).');
+  }
+  if (settings.currentLayer && (!tides || !currentGrid || force)) {
+    const [t, g] = await Promise.all([loadData<Tides>('tides.json'), loadData<CurrentGrid>('currents.json')]);
+    tides = t ?? tides;
+    currentGrid = g ?? currentGrid;
+    if (!tides || !currentGrid) toastOnce('current', 'Courants indisponibles : ouvrez l’app une fois avec une connexion.');
+  }
+  if (live) offsetH = 0;
+  timeRange.value = String(offsetH);
+  renderLayers();
 }
 
-/** Flèches recalculées pour la vue courante : visibles à tout zoom. */
-function renderWind() {
-  if (!wind || windHour < 0 || !settings.windLayer) return;
-  const src = map.getSource('wind') as GeoJSONSource | undefined; // absente tant qu'aucune carte n'est chargée
+/** Flèches recalculées pour la vue et l'heure affichées : visibles à tout zoom. */
+function renderLayers() {
+  const t = viewTime();
   const cv = map.getCanvas();
-  src?.setData(windScreenGrid(wind, windHour, cv.clientWidth, cv.clientHeight, 85, (x, y) => map.unproject([x, y])));
-  renderWindPanel();
+  if (settings.windLayer && wind) {
+    (map.getSource('wind') as GeoJSONSource | undefined)
+      ?.setData(windScreenGrid(wind, nearestHour(wind, t), cv.clientWidth, cv.clientHeight, 85, (x, y) => map.unproject([x, y])));
+  }
+  if (settings.currentLayer && tides && currentGrid) {
+    (map.getSource('current') as GeoJSONSource | undefined)
+      ?.setData(currentScreenFeatures(currentGrid, tides, t, cv.clientWidth, cv.clientHeight, 70, (lon, lat) => map.project([lon, lat])));
+  }
+  renderPanel();
 }
 
-/** Bandeau : vent au bateau (GPS actif) ou au centre de la carte, tendance, allure. */
-function renderWindPanel() {
-  if (!wind || windHour < 0) return;
+const fmtTime = (ms: number) => {
+  const d = new Date(ms);
+  const hm = d.toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' });
+  return d.toDateString() === new Date(viewTime()).toDateString() ? hm : `${d.toLocaleDateString('fr-BE', { weekday: 'short' })} ${hm}`;
+};
+
+/** Bandeau : vent et courant au bateau (GPS actif) ou au centre de la carte. */
+function renderPanel() {
+  if (!settings.windLayer && !settings.currentLayer) return;
+  const t = viewTime();
   const c = map.getCenter();
   const atBoat = boat.active && boat.last != null;
   const here = atBoat ? { lat: boat.last!.lat, lon: boat.last!.lon } : { lat: c.lat, lon: c.lng };
-  const w = inForecast(wind, here.lat, here.lon) ? windAt(wind, windHour, here.lat, here.lon) : null;
-  const expired = Date.now() - wind.times.at(-1)! > 3600_000; // prévision gardée mais dépassée
-  if (!w) {
-    $('wind-main').textContent = 'Hors zone de prévision';
-    $('wind-sub').textContent = '';
-  } else {
-    const kn = Math.round(w.speed);
-    let trend = '';
-    const later = windHour + 3 < wind.times.length ? windAt(wind, windHour + 3, here.lat, here.lon) : null;
-    if (later) {
-      const k3 = Math.round(later.speed);
-      trend = k3 - kn >= 3 ? `, forcit (${k3} kn dans 3 h)` : kn - k3 >= 3 ? `, mollit (${k3} kn dans 3 h)` : ', stable sur 3 h';
+  const where = atBoat ? 'au bateau' : 'au centre';
+
+  if (settings.windLayer) {
+    const h = wind ? nearestHour(wind, t) : -1;
+    const inRange = !!wind && t >= wind.times[0] - 1800_000 && t <= wind.times.at(-1)! + 1800_000;
+    const w = wind && inRange && inForecast(wind, here.lat, here.lon) ? windAt(wind, h, here.lat, here.lon) : null;
+    if (!w) {
+      $('wind-main').textContent = !wind ? 'Vent : pas de prévision' : !inRange ? 'Vent : hors période de prévision' : 'Vent : hors zone de prévision';
+      $('wind-sub').textContent = '';
+    } else {
+      const kn = Math.round(w.speed);
+      const later = h + 3 < wind!.times.length ? windAt(wind!, h + 3, here.lat, here.lon) : null;
+      const k3 = later ? Math.round(later.speed) : null;
+      const trend = k3 == null ? '' : k3 - kn >= 3 ? `, forcit (${k3} kn dans 3 h)` : kn - k3 >= 3 ? `, mollit (${k3} kn dans 3 h)` : ', stable sur 3 h';
+      const sail = atBoat && boat.last!.cog != null ? ` · ${pointOfSail(w.dir, boat.last!.cog)}` : '';
+      $('wind-main').textContent = `Vent ${kn} kn ${compass(w.dir)} · rafales ${Math.round(w.gust)} · F${beaufort(kn)}`;
+      $('wind-sub').textContent = `${where}${trend}${sail}`;
+      $('wind-needle').style.transform = `rotate(${(w.dir + 180) % 360}deg)`;
+      $('wind-row').style.setProperty('--needle', windColourFor(kn, settings.night));
     }
-    $('wind-main').textContent = `${kn} kn ${compass(w.dir)} · rafales ${Math.round(w.gust)} · F${beaufort(kn)}`;
-    const sail = atBoat && boat.last!.cog != null ? ` · ${pointOfSail(w.dir, boat.last!.cog)}` : '';
-    $('wind-sub').textContent = `${expired ? 'PRÉVISION DÉPASSÉE · ' : ''}${atBoat ? 'au bateau' : 'au centre'}${trend}${sail}`;
+    $('wind-dial').style.visibility = w ? 'visible' : 'hidden';
   }
-  // L'aiguille montre où va le vent (comme les flèches de la carte)
-  $('wind-dial').style.visibility = w ? 'visible' : 'hidden';
-  if (w) {
-    $('wind-needle').style.transform = `rotate(${(w.dir + 180) % 360}deg)`;
-    $('windpanel').style.setProperty('--wind', windColourFor(Math.round(w.speed), settings.night));
+
+  if (settings.currentLayer) {
+    const p = tides && currentGrid ? nearestPoint(currentGrid, here.lat, here.lon) : null;
+    const cur = p ? currentAt(p, tides!, t) : null;
+    const nt = tides ? nextTides(tides, here.lat, here.lon, t) : null;
+    $('current-main').textContent = !tides || !currentGrid ? 'Courant : données indisponibles'
+      : cur ? `Courant ${cur.speed.toFixed(1).replace('.', ',')} kn vers ${String(Math.round(cur.dir)).padStart(3, '0')}° · ${cur.flood ? 'flot' : 'jusant'}`
+      : p ? 'Courant : hors période des marées' : 'Courant : pas d’estimation ici (eaux sans marée ou estran)';
+    const parts = [
+      cur ? `étale vers ${fmtTime(cur.nextSlack)}` : '',
+      nt?.hw && nt.lw ? `PM ${fmtTime(nt.hw[0])} (${fmt(nt.hw[1])} m), BM ${fmtTime(nt.lw[0])} (${fmt(nt.lw[1])} m) à ${nt.station}` : '',
+      cur ? `${where}, estimation indicative` : '',
+    ].filter(Boolean);
+    $('current-sub').textContent = parts.join(' · ');
+    $('current-dial').style.visibility = cur ? 'visible' : 'hidden';
+    if (cur) {
+      $('current-needle').style.transform = `rotate(${cur.dir}deg)`;
+      const scale = settings.night ? CURRENT_SCALE_NIGHT : CURRENT_SCALE;
+      $('current-row').style.setProperty('--needle', scale.reduce((col, [min, c2]) => (cur.speed >= min ? c2 : col), scale[0][1]));
+    }
   }
-  const t = new Date(wind.times[windHour]);
-  const day = t.toLocaleDateString('fr-BE', { weekday: 'short', day: '2-digit', month: '2-digit' });
-  const hour = t.toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' });
-  const age = Math.round((Date.now() - wind.fetched) / 3600_000);
-  $('time-label').textContent = `${day} ${hour} · prévision KNMI${age >= 1 ? ` d’il y a ${age} h` : ''}`;
+
+  const d = new Date(t);
+  const label = `${d.toLocaleDateString('fr-BE', { weekday: 'short', day: '2-digit', month: '2-digit' })} ${d.toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' })}`;
+  const srcs = [settings.windLayer ? 'vent KNMI' : '', settings.currentLayer ? 'marée RWS' : ''].filter(Boolean).join(', ');
+  $('time-label').textContent = `${label}${live ? ' (maintenant)' : ''} · ${srcs}`;
 }
 
 timeRange.addEventListener('input', () => {
-  windHour = Number(timeRange.value);
-  windLive = !!wind && windHour === nearestHour(wind, Date.now());
-  renderWind();
+  offsetH = Number(timeRange.value);
+  live = offsetH === 0;
+  renderLayers();
 });
-$('time-now').onclick = () => { windLive = true; updateWind(); };
-$('wind-btn').onclick = () => {
-  settings = { ...settings, windLayer: !settings.windLayer };
+$('time-now').onclick = () => { live = true; offsetH = 0; timeRange.value = '0'; renderLayers(); };
+
+function toggleLayer(key: 'windLayer' | 'currentLayer', layer: string) {
+  settings = { ...settings, [key]: !settings[key] };
   saveSettings(settings);
   // Indépendant du style de carte (qui peut ne pas être chargé, ex. hors-ligne sans carte)
-  if (map.getLayer('wind')) map.setLayoutProperty('wind', 'visibility', settings.windLayer ? 'visible' : 'none');
-  updateWind();
-};
-map.on('moveend', renderWind);
-// Toutes les 10 min : suivre l'heure courante (et recharger la prévision si elle a plus de 3 h)
-setInterval(() => { if (settings.windLayer) updateWind(); }, 600_000);
+  if (map.getLayer(layer)) map.setLayoutProperty(layer, 'visibility', settings[key] ? 'visible' : 'none');
+  updateLayers();
+}
+$('wind-btn').onclick = () => toggleLayer('windLayer', 'wind');
+$('current-btn').onclick = () => toggleLayer('currentLayer', 'current');
+map.on('moveend', renderLayers);
+// Chaque minute en mode « maintenant » (le courant évolue vite) ; toutes les 10 min, rafraîchir la prévision
+setInterval(() => { if (live && (settings.windLayer || settings.currentLayer)) renderLayers(); }, 60_000);
+setInterval(() => { if (settings.windLayer || settings.currentLayer) updateLayers(); }, 600_000);
 
 async function loadChart() {
   remote = await remoteManifest();
@@ -223,6 +271,7 @@ const boat = new Boat(onFix, (msg) => {
   setLocateUi();
 });
 let zoomOnFirstFix = false;
+const DEFAULT_FIX_ZOOM = 14;
 
 let coarseWarned = false;
 let coarseCount = 0;
@@ -235,8 +284,12 @@ function onFix(f: Fix) {
     toast(`Position approximative (±${Math.round(f.acc)} m) : le téléphone ne donne pas la position exacte à ce navigateur. Android : Paramètres → Applications → ${browserName()} → Autorisations → Position → « Utiliser la position exacte ».`, 15000);
   }
   renderBoat(f);
-  if (zoomOnFirstFix) { zoomOnFirstFix = false; map.jumpTo({ zoom: Math.max(map.getZoom(), 13) }); }
-  if (settings.windLayer && !following) renderWindPanel(); // en suivi, moveend s'en charge
+  if (zoomOnFirstFix) {
+    // Première position : centrer et zoomer au niveau par défaut (balisage, sondes, alarme active)
+    zoomOnFirstFix = false;
+    map.jumpTo({ center: [f.lon, f.lat], zoom: DEFAULT_FIX_ZOOM });
+  }
+  if (!following) renderPanel(); // en suivi, moveend s'en charge
   $('instruments').hidden = false;
   $('sog').textContent = f.sog.toFixed(1);
   $('cog').textContent = f.cog == null ? '–' : String(Math.round(f.cog)).padStart(3, '0');
@@ -421,7 +474,7 @@ locateBtn.addEventListener('pointerdown', () => {
     setAlarm(null);
     setAlarmStatus('', false);
     (map.getSource('boat') as GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features: [] });
-    if (settings.windLayer) renderWindPanel();
+    renderPanel();
     setLocateUi();
     toast('GPS arrêté');
     suppressClick = true;
@@ -630,7 +683,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 window.addEventListener('pagehide', () => { if (recording) saveTrack(recording); });
 
 loadChart();
-updateWind();
+updateLayers();
 
 // Accès console pour le débogage
 Object.assign(window, { map });

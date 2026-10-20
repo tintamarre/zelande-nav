@@ -3,6 +3,7 @@
 import type { ExpressionSpecification, LayerSpecification, StyleSpecification } from 'maplibre-gl';
 import { type Settings, safetyContour, safetyDepth } from './settings';
 import { WIND_SCALE, WIND_SCALE_NIGHT } from './weather';
+import { CURRENT_SCALE, CURRENT_SCALE_NIGHT } from './currents';
 
 const PALETTES = {
   day: {
@@ -64,6 +65,8 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
   // Couleur du vent selon la force (palette atténuée la nuit)
   const scale = s.night ? WIND_SCALE_NIGHT : WIND_SCALE;
   const windColour = ['step', ['get', 'speed'], scale[0][1], ...scale.slice(1).flat()] as unknown as ExpressionSpecification;
+  const cscale = s.night ? CURRENT_SCALE_NIGHT : CURRENT_SCALE;
+  const currentColour = ['step', ['get', 'speed'], cscale[0][1], ...cscale.slice(1).flat()] as unknown as ExpressionSpecification;
 
   // Tirant d'air des ponts et câbles : -1 = inconnu (signalé, jamais supposé suffisant)
   const clearance: ExpressionSpecification = ['coalesce', ['get', 'VERCLR'], ['get', 'VERCCL'], -1];
@@ -193,6 +196,19 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
     // Couche invisible pour l'alarme : tous les dangers présents dans les tuiles, quel que soit leur SCAMIN
     { id: 'alarm-dangers', type: 'circle', source: 'enc', 'source-layer': 'enc', filter: objl('WRECKS', 'OBSTRN', 'UWTROC'),
       paint: { 'circle-radius': 2, 'circle-opacity': 0, 'circle-stroke-opacity': 0 } },
+    // --- couche optionnelle : courants de marée estimés (flèches fines, sens du courant) ---
+    { id: 'current', type: 'symbol', source: 'current',
+      layout: {
+        visibility: s.currentLayer ? 'visible' : 'none',
+        'icon-image': ['concat', 'carrow|', currentColour],
+        'icon-rotate': ['get', 'to'], 'icon-rotation-alignment': 'map',
+        'icon-size': ['interpolate', ['linear'], ['get', 'speed'], 0, 0.5, 1, 0.8, 3, 1.2],
+        'icon-allow-overlap': true, 'icon-ignore-placement': true,
+        'text-field': ['number-format', ['get', 'speed'], { locale: 'fr-BE', 'min-fraction-digits': 1, 'max-fraction-digits': 1 }],
+        'text-font': ['Noto Sans Italic'], 'text-size': 11, 'text-offset': [0, 1.6],
+        'text-allow-overlap': true, 'text-ignore-placement': true,
+      },
+      paint: { 'text-color': currentColour, 'text-halo-color': P.halo, 'text-halo-width': 2 } },
     // --- couche optionnelle : vent (flèches dans le sens du vent, couleur et taille selon la force) ---
     { id: 'wind', type: 'symbol', source: 'wind',
       layout: {
@@ -231,6 +247,7 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
       boat: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
       track: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
       wind: { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, attribution: 'Vent : KNMI via Open-Meteo (CC-BY 4.0)' },
+      current: { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, attribution: 'Courants estimés d’après la marée Rijkswaterstaat' },
     },
     layers,
   };

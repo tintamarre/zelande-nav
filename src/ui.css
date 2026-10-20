@@ -60,18 +60,18 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 .update { pointer-events: auto; margin-left: 6px; align-self: flex-start; border: 0; border-radius: 8px; padding: 5px 9px;
   background: var(--accent); color: #fff; font: inherit; font-size: 12px; cursor: pointer; }
 
-#windpanel { position: absolute; top: calc(var(--safe-top) + 64px); left: 8px; right: 64px; display: flex; flex-direction: column; gap: 4px;
+#envpanel { position: absolute; top: calc(var(--safe-top) + 64px); left: 8px; right: 64px; display: flex; flex-direction: column; gap: 4px;
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12px; }
-.wind-now { display: flex; gap: 10px; align-items: center; }
-.wind-now div { display: flex; flex-direction: column; min-width: 0; }
-#wind-main { font-size: 17px; font-variant-numeric: tabular-nums; }
-#wind-sub { color: var(--muted); }
-#wind-dial { width: 40px; height: 40px; flex: none; }
-#wind-dial circle { fill: none; stroke: var(--border); stroke-width: 2; }
-#wind-needle { fill: var(--wind, #2f7fd8); transition: transform 0.4s; transform-origin: 20px 20px; }
-.wind-time { display: flex; gap: 8px; align-items: center; }
-.wind-time input { flex: 1; min-width: 0; accent-color: var(--accent); }
-.wind-time button { font: inherit; font-size: 12px; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--fg); }
+.env-row { display: flex; gap: 10px; align-items: center; }
+.env-row div { display: flex; flex-direction: column; min-width: 0; }
+.env-row b { font-size: 15px; font-variant-numeric: tabular-nums; }
+.env-row span { color: var(--muted); }
+.dial { width: 36px; height: 36px; flex: none; }
+.dial circle { fill: none; stroke: var(--border); stroke-width: 2; }
+.needle { fill: var(--needle, #2f7fd8); transition: transform 0.4s; transform-origin: 20px 20px; }
+.env-time { display: flex; gap: 8px; align-items: center; }
+.env-time input { flex: 1; min-width: 0; accent-color: var(--accent); }
+.env-time button { font: inherit; font-size: 12px; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--fg); }
 #time-label { color: var(--muted); font-variant-numeric: tabular-nums; }
 #alarm { position: absolute; left: 50%; transform: translateX(-50%); top: calc(var(--safe-top) + 120px); z-index: 5;
   display: flex; gap: 12px; align-items: center; background: var(--danger); color: #fff; padding: 10px 14px;
