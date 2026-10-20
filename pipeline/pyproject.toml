@@ -1,0 +1,10 @@
+[project]
+name = "zelande-nav-pipeline"
+version = "0.1.0"
+description = "Téléchargement des Inland ENC Rijkswaterstaat (Zélande) et conversion en PMTiles"
+requires-python = ">=3.13"
+dependencies = [
+    "geopandas>=1.2.0",
+    "pyogrio>=0.13.0",
+    "shapely>=2.2.0",
+]

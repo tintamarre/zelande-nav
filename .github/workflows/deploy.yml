@@ -1,0 +1,79 @@
+# Régénère la carte quand Rijkswaterstaat publie une nouvelle édition IENC, puis déploie
+# l'app + la carte sur GitHub Pages. Tourne chaque jour (l'édition est hebdomadaire) et à chaque push.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Édition IENC courante
+        id: edition
+        working-directory: pipeline
+        run: echo "date=$(uv run python -I src/fetch_ienc.py --area zeeland --date)" >> "$GITHUB_OUTPUT"
+
+      - name: Carte en cache pour cette édition
+        id: tiles
+        uses: actions/cache@v4
+        with:
+          path: public/tiles
+          key: tiles-${{ steps.edition.outputs.date }}-${{ hashFiles('pipeline/src/*.py', 'pipeline/uv.lock') }}
+
+      - name: tippecanoe
+        if: steps.tiles.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -q
+          if ! sudo apt-get install -y -q tippecanoe; then
+            sudo apt-get install -y -q build-essential libsqlite3-dev zlib1g-dev
+            git clone --depth 1 --branch 2.79.0 https://github.com/felt/tippecanoe.git /tmp/tippecanoe
+            make -C /tmp/tippecanoe -j"$(nproc)" && sudo make -C /tmp/tippecanoe install
+          fi
+          tippecanoe --version
+
+      - name: Téléchargement et conversion
+        if: steps.tiles.outputs.cache-hit != 'true'
+        working-directory: pipeline
+        run: |
+          uv run python -I src/fetch_ienc.py --area zeeland --dest data
+          uv run python -I -W ignore src/enc2pmtiles.py data/zeeland -o ../public/tiles/zeeland.pmtiles --meta data/zeeland.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+dev-dist/
+public/tiles/
+pipeline/.venv/
+pipeline/data/
+pipeline/tiles/
+__pycache__/
+*.pyc
+.DS_Store
+out/
