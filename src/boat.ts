@@ -12,6 +12,8 @@ export interface Fix {
 
 const KN = 1.943844; // m/s → nœuds
 const MIN_SPEED_KN = 0.4; // en dessous : cap non significatif
+const MAX_ACC_M = 30;     // au-delà (localisation réseau/wifi) : pas de vitesse calculée entre positions
+const MAX_SPEED_KN = 40;  // au-delà : valeur aberrante pour un voilier, ignorée
 
 export class Boat {
   private watchId: number | null = null;
@@ -45,14 +47,19 @@ export class Boat {
     if (speed != null && !Number.isNaN(speed)) {
       sog = speed * KN;
       cog = heading != null && !Number.isNaN(heading) ? heading : null;
-    } else if (this.prev && t > this.prev.t) {
-      // Pas de vitesse fournie (certains navigateurs) : dérivée des deux dernières positions
+    } else if (this.prev && t - this.prev.t >= 1000 && acc <= MAX_ACC_M && this.prev.acc <= MAX_ACC_M) {
+      // Pas de vitesse fournie (certains navigateurs) : dérivée des deux dernières positions précises
       const d = distanceM(this.prev, { lat, lon });
       sog = (d / ((t - this.prev.t) / 1000)) * KN;
-      cog = d > Math.max(2, acc / 4) ? bearingDeg(this.prev, { lat, lon }) : null;
+      cog = d > Math.max(2, acc / 2) ? bearingDeg(this.prev, { lat, lon }) : null;
     } else {
+      // Position imprécise (±1 km en localisation réseau) : vitesse et cap inconnus
       sog = 0;
       cog = null;
+    }
+    if (sog > MAX_SPEED_KN) {
+      sog = this.last?.sog ?? 0;
+      cog = this.last?.cog ?? null;
     }
     // Lissage léger (moyenne exponentielle ; circulaire pour le cap)
     if (this.last) {

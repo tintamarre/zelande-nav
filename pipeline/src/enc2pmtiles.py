@@ -197,6 +197,8 @@ def main():
     ap.add_argument("--meta", help="JSON d'édition produit par fetch_ienc.py (date, titre)")
     ap.add_argument("--minzoom", type=int, default=6)
     ap.add_argument("--maxzoom", type=int, default=15)
+    ap.add_argument("--min-bytes", type=int, default=0,
+                    help="échoue si le PMTiles est plus petit (garde-fou contre une génération tronquée)")
     ap.add_argument("--keep-geojson", help="dossier où garder les GeoJSONSeq intermédiaires")
     args = ap.parse_args()
 
@@ -254,6 +256,9 @@ def main():
 
     size = os.path.getsize(args.output)
     print(f"écrit {args.output} ({size / 1e6:.1f} Mo)")
+    if size < args.min_bytes:
+        # Vu avec tippecanoe 2.49 (Ubuntu 24.04) : tuiles quasi vides, sans erreur
+        sys.exit(f"PMTiles anormalement petit ({size} < {args.min_bytes} octets) : vérifier la version de tippecanoe")
 
     # Manifeste lu par l'app pour vérifier la version de la carte.
     edition = json.load(open(args.meta)) if args.meta else {}

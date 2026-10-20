@@ -38,23 +38,37 @@ jobs:
           path: public/tiles
           key: tiles-${{ steps.edition.outputs.date }}-${{ hashFiles('pipeline/src/*.py', 'pipeline/uv.lock') }}
 
-      - name: tippecanoe
+      # Version fixée, compilée depuis les sources : le paquet Ubuntu 24.04 (2.49) produit
+      # des tuiles quasi vides avec nos options, sans signaler d'erreur.
+      - name: tippecanoe en cache
+        id: tippecanoe
         if: steps.tiles.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/tippecanoe
+          key: tippecanoe-2.79.0-${{ runner.os }}
+
+      - name: Compilation de tippecanoe
+        if: steps.tiles.outputs.cache-hit != 'true' && steps.tippecanoe.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update -q
-          if ! sudo apt-get install -y -q tippecanoe; then
-            sudo apt-get install -y -q build-essential libsqlite3-dev zlib1g-dev
-            git clone --depth 1 --branch 2.79.0 https://github.com/felt/tippecanoe.git /tmp/tippecanoe
-            make -C /tmp/tippecanoe -j"$(nproc)" && sudo make -C /tmp/tippecanoe install
-          fi
-          tippecanoe --version
+          sudo apt-get install -y -q build-essential libsqlite3-dev zlib1g-dev
+          git clone --depth 1 --branch 2.79.0 https://github.com/felt/tippecanoe.git /tmp/tippecanoe
+          make -C /tmp/tippecanoe -j"$(nproc)" tippecanoe
+          mkdir -p ~/.local/bin && cp /tmp/tippecanoe/tippecanoe ~/.local/bin/
+
+      - name: Version de tippecanoe
+        if: steps.tiles.outputs.cache-hit != 'true'
+        run: |
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          ~/.local/bin/tippecanoe --version
 
       - name: Téléchargement et conversion
         if: steps.tiles.outputs.cache-hit != 'true'
         working-directory: pipeline
         run: |
           uv run python -I src/fetch_ienc.py --area zeeland --dest data
-          uv run python -I -W ignore src/enc2pmtiles.py data/zeeland -o ../public/tiles/zeeland.pmtiles --meta data/zeeland.json
+          uv run python -u -I -W ignore src/enc2pmtiles.py data/zeeland -o ../public/tiles/zeeland.pmtiles --meta data/zeeland.json --min-bytes 30000000
 
       - uses: actions/setup-node@v4
         with:

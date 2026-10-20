@@ -20,7 +20,7 @@ scripts/    Utilitaires (polices, capture d'écran)
 
 - Node 22 (`.nvmrc` ; Node 18 ne suffit pas pour le build PWA)
 - [uv](https://docs.astral.sh/uv/) et Python 3.13
-- [tippecanoe](https://github.com/felt/tippecanoe) ≥ 2.17 (`apt install -t bookworm-backports tippecanoe`, `brew install tippecanoe`)
+- [tippecanoe](https://github.com/felt/tippecanoe) ≥ 2.17 (`brew install tippecanoe` ou compilation depuis les sources ; éviter le paquet Ubuntu 24.04 en 2.49, qui produit des tuiles quasi vides)
 
 ## Générer la carte
 

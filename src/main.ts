@@ -122,7 +122,7 @@ function onFix(f: Fix) {
   $('instruments').hidden = false;
   $('sog').textContent = f.sog.toFixed(1);
   $('cog').textContent = f.cog == null ? '–' : String(Math.round(f.cog)).padStart(3, '0');
-  $('pos').textContent = `${formatLatLon(f.lat, f.lon)} ±${Math.round(f.acc)} m`;
+  $('pos').textContent = `${formatLatLon(f.lat, f.lon)} ±${Math.round(f.acc)} m${f.acc > 30 ? ' · GPS imprécis' : ''}`;
   if (following) map.easeTo({ center: [f.lon, f.lat], duration: 600 });
   if (recording) recordPoint(f);
   // Le contrôle hauts-fonds interroge les objets rendus : attendre la fin du déplacement de la carte
