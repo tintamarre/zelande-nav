@@ -154,12 +154,21 @@ let wakeLock: WakeLockSentinel | null = null;
 
 const boat = new Boat(onFix, (msg) => { toast(msg); setLocateUi(); });
 
+let coarseWarned = false;
+let coarseCount = 0;
+
 function onFix(f: Fix) {
+  // Précision kilométrique répétée : position « approximative » accordée par le système (Android 12+)
+  coarseCount = f.acc > 500 ? coarseCount + 1 : 0;
+  if (coarseCount >= 3 && !coarseWarned) {
+    coarseWarned = true;
+    toast(`Position approximative (±${Math.round(f.acc)} m) : le téléphone ne donne pas la position exacte à ce navigateur. Android : Paramètres → Applications → ${browserName()} → Autorisations → Position → « Utiliser la position exacte ».`, 15000);
+  }
   renderBoat(f);
   $('instruments').hidden = false;
   $('sog').textContent = f.sog.toFixed(1);
   $('cog').textContent = f.cog == null ? '–' : String(Math.round(f.cog)).padStart(3, '0');
-  $('pos').textContent = `${formatLatLon(f.lat, f.lon)} ±${Math.round(f.acc)} m${f.acc > 30 ? ' · GPS imprécis' : ''}`;
+  $('pos').textContent = `${formatLatLon(f.lat, f.lon)} ±${Math.round(f.acc)} m${f.acc > 500 ? ' · position approximative !' : f.acc > 30 ? ' · GPS imprécis' : ''}`;
   if (following) map.easeTo({ center: [f.lon, f.lat], duration: 600 });
   if (recording) recordPoint(f);
   // Le contrôle hauts-fonds interroge les objets rendus : attendre la fin du déplacement de la carte
@@ -445,6 +454,11 @@ $('chart-delete').onclick = async () => {
 // ---------- divers ----------
 $('about-btn').onclick = () => $<HTMLDialogElement>('about-dlg').showModal();
 $('app-version').textContent = `Version ${__APP_VERSION__}`;
+
+function browserName() {
+  const ua = navigator.userAgent;
+  return /Firefox/.test(ua) ? 'Firefox' : /SamsungBrowser/.test(ua) ? 'Samsung Internet' : /Chrome/.test(ua) ? 'Chrome' : 'le navigateur';
+}
 
 let toastTimer = 0;
 function toast(msg: string, ms = 3500) {
