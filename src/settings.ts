@@ -8,6 +8,7 @@ export interface Settings {
   night: boolean;       // palette nuit (S-52 « night », atténuée)
   soundings: boolean;
   lookAheadMin: number; // anticipation de l'alarme hauts-fonds (minutes)
+  windLayer: boolean;   // couche optionnelle : prévision de vent
 }
 
 export const DEFAULTS: Settings = {
@@ -18,6 +19,7 @@ export const DEFAULTS: Settings = {
   night: false,
   soundings: true,
   lookAheadMin: 2,
+  windLayer: false,
 };
 
 const KEY = 'zn.settings';

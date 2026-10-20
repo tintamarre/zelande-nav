@@ -8,6 +8,7 @@ import { deleteOfflineChart, downloadChart, formatEdition, type Manifest, offlin
 import { describe, type Props } from './s57';
 import { type Settings, loadSettings, safetyContour, safetyDepth, saveSettings } from './settings';
 import { buildStyle } from './style';
+import { compass, loadWind, nearestHour, type WindForecast, windGeoJSON } from './weather';
 import { registerSymbols } from './symbols';
 import { type Track, type TrackPoint, deleteTrack, destination, exportGpx, listTracks, saveTrack, trackNm } from './track';
 
@@ -46,8 +47,44 @@ function applyStyle() {
   if (!sourceUrl) return;
   map.setStyle(buildStyle(settings, sourceUrl, GLYPHS), { diff: true });
   // Les données GeoJSON (bateau, trace) sont remises après un changement de style
-  map.once('styledata', () => { renderTrack(); if (boat.last) renderBoat(boat.last); });
+  map.once('styledata', () => { renderTrack(); renderWind(); if (boat.last) renderBoat(boat.last); });
+  updateWind();
 }
+
+// ---------- couche vent ----------
+let wind: WindForecast | null = null;
+let windHour = -1;
+const timeRange = $<HTMLInputElement>('time-range');
+
+async function updateWind(force = false) {
+  $('timebar').hidden = !settings.windLayer;
+  if (!settings.windLayer) return;
+  const fc = await loadWind(force);
+  if (!fc) { toast('Prévision de vent indisponible (pas de connexion ni de prévision gardée).'); return; }
+  const fresh = fc !== wind;
+  wind = fc;
+  timeRange.max = String(fc.times.length - 1);
+  if (fresh || windHour < 0) windHour = nearestHour(fc, Date.now());
+  timeRange.value = String(windHour);
+  renderWind();
+}
+
+function renderWind() {
+  const src = map.getSource('wind') as GeoJSONSource | undefined;
+  if (!src || !wind || windHour < 0) return;
+  src.setData(windGeoJSON(wind, windHour));
+  const t = new Date(wind.times[windHour]);
+  const day = t.toLocaleDateString('fr-BE', { weekday: 'short', day: '2-digit', month: '2-digit' });
+  const hour = t.toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' });
+  const age = Math.round((Date.now() - wind.fetched) / 3600_000);
+  // Vent au centre de la carte (point de grille le plus proche)
+  const c = map.getCenter();
+  const near = wind.points.reduce((a, b) => (Math.hypot(b.lat - c.lat, b.lon - c.lng) < Math.hypot(a.lat - c.lat, a.lon - c.lng) ? b : a));
+  $('time-label').textContent = `Vent ${day} ${hour} · centre : ${near.speed[windHour]} kn ${compass(near.dir[windHour])}, rafales ${near.gust[windHour]} kn · prévision KNMI${age >= 1 ? ` d’il y a ${age} h` : ''}`;
+}
+timeRange.addEventListener('input', () => { windHour = Number(timeRange.value); renderWind(); });
+map.on('moveend', () => { if (settings.windLayer) renderWind(); });
+setInterval(() => { if (settings.windLayer) updateWind(); }, 3600_000);
 
 async function loadChart() {
   remote = await remoteManifest();

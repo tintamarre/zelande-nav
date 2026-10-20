@@ -22,6 +22,11 @@
     </button>
   </header>
 
+  <section id="timebar" hidden aria-label="Heure de la prévision">
+    <input id="time-range" type="range" min="0" max="0" step="1" aria-label="Heure de la prévision">
+    <span id="time-label"></span>
+  </section>
+
   <div id="alarm" role="alert" hidden>
     <strong id="alarm-text">Haut-fond</strong>
     <button id="alarm-ack" type="button">OK</button>
@@ -60,6 +65,8 @@
       <label>Tirant d’air (m) <input name="airDraft" type="number" step="0.5" min="0" max="60" inputmode="decimal"></label>
       <label>Eau profonde à partir de (m) <input name="deepContour" type="number" step="1" min="2" max="30" inputmode="decimal"></label>
       <label>Anticipation alarme hauts-fonds (min) <input name="lookAheadMin" type="number" step="1" min="0" max="15" inputmode="numeric"></label>
+      <h2>Couches</h2>
+      <label class="check"><input name="windLayer" type="checkbox"> Vent (prévision KNMI, en ligne)</label>
       <label class="check"><input name="soundings" type="checkbox"> Afficher les sondes</label>
       <label class="check"><input name="night" type="checkbox"> Mode nuit</label>
       <menu><button value="close">Fermer</button></menu>

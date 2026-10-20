@@ -4,6 +4,7 @@
 //   bcn|<BCNSHP>|<COLOUR>|<COLPAT>   balises
 //   top|<TOPSHP>|<COLOUR>            voyants
 //   light|<COLOUR>                   feux (flamme)
+//   barb|<nœuds arrondis à 5>|<couleur>   barbules de vent
 //   wreck, rock, obstn, isodgr, notice, harbour, underline, boat
 // Ils sont générés sur l'événement « styleimagemissing » de MapLibre.
 import type { Map as MlMap } from 'maplibre-gl';
@@ -166,6 +167,28 @@ const STATIC: Record<string, () => ImageData> = {
   }),
 };
 
+// Barbule de vent : hampe vers le nord (le vent vient du nord ; rotation = direction d'origine),
+// station au centre. Fanion = 50 kn, trait long = 10 kn, trait court = 5 kn (convention OMM).
+function barb(knots: number, colour: string) {
+  return make(44, 44, (c) => {
+    c.strokeStyle = colour;
+    c.fillStyle = colour;
+    c.lineWidth = 1.8;
+    if (knots < 3) {
+      c.beginPath(); c.arc(22, 22, 4, 0, Math.PI * 2); c.stroke();
+      return;
+    }
+    const top = 3, step = 4.5;
+    c.beginPath(); c.moveTo(22, 22); c.lineTo(22, top); c.stroke();
+    c.beginPath(); c.arc(22, 22, 1.8, 0, Math.PI * 2); c.fill();
+    let k = Math.round(knots / 5) * 5;
+    let y = top;
+    while (k >= 50) { c.beginPath(); c.moveTo(22, y); c.lineTo(33, y + 2.5); c.lineTo(22, y + 5); c.closePath(); c.fill(); y += 6.5; k -= 50; }
+    while (k >= 10) { c.beginPath(); c.moveTo(22, y); c.lineTo(33, y - 3); c.stroke(); y += step; k -= 10; }
+    if (k >= 5) { if (y === top) y += step; c.beginPath(); c.moveTo(22, y); c.lineTo(27.5, y - 1.5); c.stroke(); }
+  });
+}
+
 export function registerSymbols(map: MlMap) {
   map.on('styleimagemissing', (e: { id: string }) => {
     const id = e.id;
@@ -176,6 +199,7 @@ export function registerSymbols(map: MlMap) {
     else if (kind === 'bcn') img = beacon(a, b, c);
     else if (kind === 'top') img = topmark(a, b);
     else if (kind === 'light') img = light(a);
+    else if (kind === 'barb') img = barb(Number(a), b || INK);
     else if (STATIC[kind]) img = STATIC[kind]();
     if (!img) return;
     map.addImage(id, img, {
