@@ -26,12 +26,21 @@ class BlobSource implements Source {
   }
 }
 
-export function offlineManifest(): Manifest | null {
+function storedManifest(): Manifest | null {
   try {
     return JSON.parse(localStorage.getItem(OFFLINE_KEY) ?? 'null');
   } catch {
     return null;
   }
+}
+
+/** Manifeste de la carte hors-ligne, seulement si le fichier est réellement présent dans le cache (purge, quota…). */
+export async function offlineManifest(): Promise<Manifest | null> {
+  const m = storedManifest();
+  if (!m) return null;
+  const present = 'caches' in window && (await (await caches.open(CACHE)).match(offlineUrl(m), { ignoreVary: true })) != null;
+  if (!present) localStorage.removeItem(OFFLINE_KEY);
+  return present ? m : null;
 }
 
 /** Manifeste publié (null hors connexion). */
@@ -48,13 +57,14 @@ const offlineUrl = (m: Manifest) => `${CHART_BASE}${m.file}?v=${m.sha256_16}`;
 
 /** Ouvre la carte : la copie locale si elle existe, sinon le fichier en ligne. */
 export async function openChart(remote: Manifest | null): Promise<{ pm: PMTiles; manifest: Manifest; offline: boolean } | null> {
-  const local = offlineManifest();
+  const local = storedManifest();
   if (local && 'caches' in window) {
     const res = await (await caches.open(CACHE)).match(offlineUrl(local));
     if (res) {
       const blob = await res.blob();
       return { pm: new PMTiles(new BlobSource(blob, `offline-${local.sha256_16}`)), manifest: local, offline: true };
     }
+    localStorage.removeItem(OFFLINE_KEY); // annoncée mais absente du cache (purgée par le navigateur)
   }
   if (!remote) return null;
   const url = `${CHART_BASE}${remote.file}?v=${remote.sha256_16}`;
@@ -78,11 +88,16 @@ export async function downloadChart(m: Manifest, onProgress: (f: number) => void
   }
   const blob = new Blob(chunks as BlobPart[], { type: 'application/octet-stream' });
   if (blob.size !== m.bytes) throw new Error(`fichier incomplet (${blob.size} / ${m.bytes} octets)`);
+  // Empreinte : le fichier doit être exactement l'édition annoncée par le manifeste
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()));
+  const sha = [...digest.slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  if (sha !== m.sha256_16) throw new Error('fichier différent de l’édition annoncée (nouvelle publication en cours ?) : réessayez');
   await navigator.storage?.persist?.(); // demande au navigateur de ne pas purger la carte
   const cache = await caches.open(CACHE);
-  for (const k of await cache.keys()) await cache.delete(k); // une seule édition gardée
+  // Nouvelle édition écrite d'abord : en cas d'échec (quota), l'ancienne reste utilisable
   await cache.put(url, new Response(blob, { headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(blob.size) } }));
   localStorage.setItem(OFFLINE_KEY, JSON.stringify(m));
+  for (const req of await cache.keys()) if (req.url !== new URL(url).href) await cache.delete(req); // une seule édition gardée
 }
 
 export async function deleteOfflineChart() {

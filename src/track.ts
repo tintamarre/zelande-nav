@@ -6,21 +6,27 @@ export interface Track { id: number; name: string; points: TrackPoint[] }
 const DB = 'zn-tracks';
 const STORE = 'tracks';
 
+// Une seule connexion pour toute la session (au lieu d'une par opération)
+let dbPromise: Promise<IDBDatabase> | null = null;
 function db(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
+  dbPromise ??= new Promise((resolve, reject) => {
     const req = indexedDB.open(DB, 1);
     req.onupgradeneeded = () => req.result.createObjectStore(STORE, { keyPath: 'id' });
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onerror = () => { dbPromise = null; reject(req.error); };
   });
+  return dbPromise;
 }
 
+/** Résout quand la transaction est validée (pas seulement la requête), pour que les écritures soient durables. */
 async function tx<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> {
   const d = await db();
   return new Promise((resolve, reject) => {
-    const req = fn(d.transaction(STORE, mode).objectStore(STORE));
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    const t = d.transaction(STORE, mode);
+    const req = fn(t.objectStore(STORE));
+    t.oncomplete = () => resolve(req.result);
+    t.onerror = () => reject(t.error ?? req.error);
+    t.onabort = () => reject(t.error ?? new Error('transaction annulée'));
   });
 }
 

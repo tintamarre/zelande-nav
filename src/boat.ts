@@ -34,7 +34,10 @@ export class Boat {
     this.last = this.prev = null; // ne pas réutiliser la position d'une session précédente
     this.watchId = navigator.geolocation.watchPosition(
       (p) => this.update(p),
-      (e) => this.onError(e.code === e.PERMISSION_DENIED ? 'Accès à la position refusé' : 'Position indisponible'),
+      (e) => {
+        if (e.code === e.PERMISSION_DENIED) this.stop(); // aucun fix n'arrivera : ne pas paraître actif
+        this.onError(e.code === e.PERMISSION_DENIED ? 'Accès à la position refusé' : 'Position indisponible');
+      },
       { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 },
     );
   }
@@ -90,9 +93,10 @@ export class Boat {
 /** 51°32.123'N 3°45.678'E */
 export function formatLatLon(lat: number, lon: number): string {
   const f = (v: number, pos: string, neg: string, w: number) => {
-    const a = Math.abs(v);
-    const deg = Math.floor(a);
-    const min = (a - deg) * 60;
+    // Arrondi sur les minutes totales : 51,9999996° donne 52°00.000′ et non 51°60.000′
+    const total = Math.round(Math.abs(v) * 60000) / 1000;
+    const deg = Math.floor(total / 60);
+    const min = total - deg * 60;
     return `${String(deg).padStart(w, '0')}°${min.toFixed(3).padStart(6, '0')}′${v >= 0 ? pos : neg}`;
   };
   return `${f(lat, 'N', 'S', 2)} ${f(lon, 'E', 'W', 3)}`;

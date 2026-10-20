@@ -11,7 +11,7 @@ export default defineConfig({
   build: { chunkSizeWarningLimit: 1500 },
   plugins: [
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt', // mise à jour proposée à l'utilisateur, jamais en pleine navigation
       includeAssets: ['icon.svg', 'apple-touch-icon.png', 'fonts/**/*.pbf', 'fonts/OFL.txt'],
       manifest: {
         name: 'Zélande Nav',
@@ -36,6 +36,9 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,pbf,txt}'],
         globIgnores: ['tiles/**'],
         maximumFileSizeToCacheInBytes: 3_000_000,
+        // 1re installation : contrôle immédiat de la page (hors-ligne dès la 1re visite) ; une mise à jour
+        // attend toujours le clic sur « Mettre à jour » (pas de skipWaiting en mode prompt)
+        clientsClaim: true,
         navigateFallbackDenylist: [/\/tiles\//], // l'app peut être servie dans un sous-dossier
       },
     }),

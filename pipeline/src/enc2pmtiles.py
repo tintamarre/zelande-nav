@@ -105,9 +105,8 @@ def cell_scale(path):
         return 0
 
 
-def read_cell(path):
+def read_cell(path, cscl):
     frames = []
-    cscl = cell_scale(path)
     for layer, _geom in pyogrio.list_layers(path):
         if layer not in KEEP and layer != "SOUNDG":
             continue
@@ -212,9 +211,11 @@ def main():
         sys.exit("aucune cellule .000 trouvée")
 
     frames = []
-    for c in sorted(cells, key=cell_scale):  # petite échelle d'abord
+    # Échelle lue une seule fois par cellule. (En Zélande toutes les cellules sont au 1:2000 :
+    # pas de superposition d'échelles à arbitrer ; cscl reste disponible pour le style.)
+    for cscl, c in sorted((cell_scale(c), c) for c in cells):
         print(f"lecture {os.path.basename(c)}")
-        frames += read_cell(c)
+        frames += read_cell(c, cscl)
     gdf = gpd.GeoDataFrame(pd.concat(frames, ignore_index=True), crs="EPSG:4326")
     print(f"{len(gdf)} objets, {gdf['objl'].nunique()} classes")
     print(gdf["objl"].value_counts().to_string())

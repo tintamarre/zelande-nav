@@ -29,7 +29,11 @@ jobs:
       - name: Édition IENC courante
         id: edition
         working-directory: pipeline
-        run: echo "date=$(uv run python -I src/fetch_ienc.py --area zeeland --date)" >> "$GITHUB_OUTPUT"
+        # Échec explicite si le catalogue est injoignable : sinon la clé de cache serait « tiles--… »
+        run: |
+          date=$(uv run python -I src/fetch_ienc.py --area zeeland --date)
+          test -n "$date"
+          echo "date=$date" >> "$GITHUB_OUTPUT"
 
       - name: Carte en cache pour cette édition
         id: tiles

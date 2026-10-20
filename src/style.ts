@@ -32,6 +32,7 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
   const deep = Math.max(s.deepContour, safety + 0.5);
   const sc = safetyContour(s);
   const air = s.airDraft;
+  const sd = safetyDepth(s); // seuil réel, identique à celui de l'alarme (main.ts)
 
   const depthColour = (attr = 'DRVAL1'): ExpressionSpecification => [
     'step', ['coalesce', ['get', attr], 0],
@@ -44,7 +45,7 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
   const dec: ExpressionSpecification = ['round', ['*', ['-', d, whole], 10]];
   const soundingText: ExpressionSpecification = [
     'case',
-    ['>=', d, 10], ['format', ['to-string', ['round', d]], {}],
+    ['>=', d, 10], ['format', ['to-string', whole], {}], // tronqué, jamais arrondi vers le plus profond
     ['==', dec, 0], ['format', ['to-string', whole], {}],
     ['format', ['to-string', whole], {}, ['to-string', dec], { 'font-scale': 0.72 }],
   ];
@@ -64,7 +65,17 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
   const scale = s.night ? WIND_SCALE_NIGHT : WIND_SCALE;
   const windColour = ['step', ['get', 'speed'], scale[0][1], ...scale.slice(1).flat()] as unknown as ExpressionSpecification;
 
-  const clearance: ExpressionSpecification = ['coalesce', ['get', 'VERCLR'], ['get', 'VERCCL'], 999];
+  // Tirant d'air des ponts et câbles : -1 = inconnu (signalé, jamais supposé suffisant)
+  const clearance: ExpressionSpecification = ['coalesce', ['get', 'VERCLR'], ['get', 'VERCCL'], -1];
+  const tooLow: ExpressionSpecification = ['all', ['>=', clearance, 0], ['<=', clearance, air]];
+  const unknownClr: ExpressionSpecification = ['<', clearance, 0];
+  const clrColour = (ok: string): ExpressionSpecification => ['case', tooLow, P.danger, unknownClr, '#e07b00', ok];
+
+  // Danger isolé : sonde ≤ contour de sécurité, ou sans sonde mais découvrant / émergé (WATLEV 1, 2, 4, 5).
+  // Même règle que isDangerous() dans main.ts.
+  const dangerous: ExpressionSpecification = ['any',
+    ['all', ['has', 'VALSOU'], ['<=', ['get', 'VALSOU'], sd]],
+    ['all', ['!', ['has', 'VALSOU']], ['match', ['to-string', ['coalesce', ['get', 'WATLEV'], '']], ['1', '2', '4', '5'], true, false]]];
 
   const layers: LayerSpecification[] = [
     { id: 'bg', type: 'background', paint: { 'background-color': P.nodata } },
@@ -79,7 +90,7 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
       paint: { 'fill-color': P.built } },
     { id: 'bridge-fill', type: 'fill', source: 'enc', 'source-layer': 'enc',
       filter: ['all', objl('BRIDGE', 'bridge'), ['==', ['geometry-type'], 'Polygon']],
-      paint: { 'fill-color': ['case', ['<', clearance, air], P.danger, '#8c8c8c'], 'fill-opacity': 0.75 } },
+      paint: { 'fill-color': clrColour('#8c8c8c'), 'fill-opacity': 0.75 } },
     { id: 'ponton', type: 'fill', source: 'enc', 'source-layer': 'enc', filter: objl('PONTON', 'FLODOC', 'DRYDOC'),
       paint: { 'fill-color': '#a8a8a8', 'fill-outline-color': P.coast } },
     // --- zones réglementées (contours tiretés magenta) ---
@@ -101,9 +112,9 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
     { id: 'slcons', type: 'line', source: 'enc', 'source-layer': 'enc', filter: objl('SLCONS', 'DYKCON', 'DAMCON', 'GATCON', 'CAUSWY'),
       paint: { 'line-color': P.coast, 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 1, 15, 2.5] } },
     { id: 'bridge-line', type: 'line', source: 'enc', 'source-layer': 'enc', filter: objl('BRIDGE', 'bridge'),
-      paint: { 'line-color': ['case', ['<', clearance, air], P.danger, '#4a4a4a'], 'line-width': 2.5 } },
+      paint: { 'line-color': clrColour('#4a4a4a'), 'line-width': 2.5 } },
     { id: 'cblohd', type: 'line', source: 'enc', 'source-layer': 'enc', filter: objl('CBLOHD', 'cblohd'),
-      paint: { 'line-color': ['case', ['<', clearance, air], P.danger, P.magenta], 'line-width': 1.5, 'line-dasharray': [3, 2] } },
+      paint: { 'line-color': clrColour(P.magenta), 'line-width': 1.5, 'line-dasharray': [3, 2] } },
     { id: 'navlne', type: 'line', source: 'enc', 'source-layer': 'enc', filter: objl('NAVLNE', 'RECTRC', 'FERYRT'), minzoom: 11,
       paint: { 'line-color': P.coast, 'line-width': 1, 'line-dasharray': [6, 3] } },
     { id: 'cblsub', type: 'line', source: 'enc', 'source-layer': 'enc', filter: ['all', objl('CBLSUB', 'PIPSOL'), minzoomOk],
@@ -111,7 +122,7 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
     { id: 'pylons', type: 'circle', source: 'enc', 'source-layer': 'enc', filter: objl('PYLONS', 'PILPNT'), minzoom: 13,
       paint: { 'circle-radius': 1.8, 'circle-color': P.coast } },
     // --- sondes ---
-    ...(s.soundings ? soundingLayers(soundingText, safety, P) : []),
+    ...(s.soundings ? soundingLayers(soundingText, sd, P) : []),
     // --- noms ---
     { id: 'names', type: 'symbol', source: 'enc', 'source-layer': 'enc', filter: ['all', objl('SEAARE', 'LNDRGN', 'hrbare'), ['has', 'OBJNAM']],
       minzoom: 10,
@@ -122,7 +133,7 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
     { id: 'dangers', type: 'symbol', source: 'enc', 'source-layer': 'enc', filter: ['all', objl('WRECKS', 'OBSTRN', 'UWTROC'), minzoomOk],
       layout: {
         'icon-image': ['case',
-          ['all', ['has', 'VALSOU'], ['<=', ['get', 'VALSOU'], safety]], 'isodgr',
+          dangerous, 'isodgr',
           ['==', ['get', 'objl'], 'WRECKS'], 'wreck',
           ['==', ['get', 'objl'], 'UWTROC'], 'rock', 'obstn'],
         'icon-allow-overlap': true, 'icon-size': ['interpolate', ['linear'], ['zoom'], 10, 0.7, 15, 1],
@@ -174,11 +185,14 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
       paint: { 'text-color': P.magenta, 'text-halo-color': P.halo, 'text-halo-width': 1.2 } },
     // --- tirant d'air des ponts et câbles ---
     { id: 'clearance', type: 'symbol', source: 'enc', 'source-layer': 'enc',
-      filter: ['all', objl('BRIDGE', 'bridge', 'CBLOHD', 'cblohd'), ['any', ['has', 'VERCLR'], ['has', 'VERCCL']]],
+      filter: objl('BRIDGE', 'bridge', 'CBLOHD', 'cblohd'),
       minzoom: 12,
-      layout: { 'text-field': ['concat', 'H ', ['to-string', clearance], ' m'], 'text-font': ['Noto Sans Medium'],
+      layout: { 'text-field': ['case', unknownClr, 'H ? m', ['concat', 'H ', ['to-string', clearance], ' m']], 'text-font': ['Noto Sans Medium'],
         'text-size': 11, 'symbol-placement': 'point' },
-      paint: { 'text-color': ['case', ['<', clearance, air], P.danger, P.text], 'text-halo-color': P.halo, 'text-halo-width': 1.5 } },
+      paint: { 'text-color': clrColour(P.text), 'text-halo-color': P.halo, 'text-halo-width': 1.5 } },
+    // Couche invisible pour l'alarme : tous les dangers présents dans les tuiles, quel que soit leur SCAMIN
+    { id: 'alarm-dangers', type: 'circle', source: 'enc', 'source-layer': 'enc', filter: objl('WRECKS', 'OBSTRN', 'UWTROC'),
+      paint: { 'circle-radius': 2, 'circle-opacity': 0, 'circle-stroke-opacity': 0 } },
     // --- couche optionnelle : vent (flèches dans le sens du vent, couleur et taille selon la force) ---
     { id: 'wind', type: 'symbol', source: 'wind',
       layout: {

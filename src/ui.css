@@ -54,6 +54,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 #instruments small { color: var(--muted); font-size: 11px; }
 #instruments .pos { grid-column: 1 / -1; font-size: 13px; }
 #instruments.shallow #depth { color: var(--danger); }
+#alarm-status { color: var(--muted); font-size: 12px; }
+#alarm-status:empty { display: none; }
+#alarm-status.suspended { color: var(--danger); font-weight: 600; }
+.update { pointer-events: auto; margin-left: 6px; align-self: flex-start; border: 0; border-radius: 8px; padding: 5px 9px;
+  background: var(--accent); color: #fff; font: inherit; font-size: 12px; cursor: pointer; }
 
 #windpanel { position: absolute; top: calc(var(--safe-top) + 64px); left: 8px; right: 64px; display: flex; flex-direction: column; gap: 4px;
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12px; }

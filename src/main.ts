@@ -23,7 +23,8 @@ let sourceUrl = '';
 const protocol = new Protocol();
 maplibregl.addProtocol('pmtiles', protocol.tile);
 
-registerSW({ immediate: true });
+// Nouvelle version : proposée, jamais appliquée d'office (un rechargement couperait GPS, alarme et trace)
+const updateSW = registerSW({ immediate: true, onNeedRefresh: () => { $('update-btn').hidden = false; } });
 
 // ---------- carte ----------
 const map = new maplibregl.Map({
@@ -45,7 +46,6 @@ registerSymbols(map);
 let styledSource = '';
 function applyStyle() {
   document.documentElement.dataset.theme = settings.night ? 'night' : 'day';
-  updateWind();
   if (!sourceUrl) return;
   // Le mode diff de MapLibre ne sait pas remplacer une source utilisée par des couches :
   // rechargement complet quand la carte change (ex. passage en ligne → hors-ligne)
@@ -58,6 +58,8 @@ function applyStyle() {
 // ---------- couche vent ----------
 let wind: WindForecast | null = null;
 let windHour = -1;
+let windLive = true;   // l'heure affichée suit l'heure courante tant que le curseur n'a pas été déplacé
+let windToasted = false;
 const timeRange = $<HTMLInputElement>('time-range');
 
 async function updateWind(force = false) {
@@ -66,9 +68,12 @@ async function updateWind(force = false) {
   $('wind-btn').setAttribute('aria-pressed', String(settings.windLayer));
   if (!settings.windLayer) return;
   const fc = await loadWind(force);
-  if (!fc) { toast('Prévision de vent indisponible (pas de connexion ni de prévision gardée).'); return; }
-  // Nouvelle prévision : revenir à l'heure courante ; sinon garder l'heure choisie sur le curseur
-  if (fc.fetched !== wind?.fetched || windHour < 0) windHour = Math.min(nearestHour(fc, Date.now()), fc.times.length - 1);
+  if (!fc) {
+    if (!windToasted) toast('Prévision de vent indisponible (pas de connexion ni de prévision gardée).');
+    windToasted = true;
+    return;
+  }
+  if (windLive || windHour < 0 || windHour >= fc.times.length) windHour = nearestHour(fc, Date.now());
   wind = fc;
   timeRange.max = String(fc.times.length - 1);
   timeRange.value = String(windHour);
@@ -77,10 +82,10 @@ async function updateWind(force = false) {
 
 /** Flèches recalculées pour la vue courante : visibles à tout zoom. */
 function renderWind() {
-  const src = map.getSource('wind') as GeoJSONSource | undefined;
-  if (!src || !wind || windHour < 0 || !settings.windLayer) return;
+  if (!wind || windHour < 0 || !settings.windLayer) return;
+  const src = map.getSource('wind') as GeoJSONSource | undefined; // absente tant qu'aucune carte n'est chargée
   const cv = map.getCanvas();
-  src.setData(windScreenGrid(wind, windHour, cv.clientWidth, cv.clientHeight, 85, (x, y) => map.unproject([x, y])));
+  src?.setData(windScreenGrid(wind, windHour, cv.clientWidth, cv.clientHeight, 85, (x, y) => map.unproject([x, y])));
   renderWindPanel();
 }
 
@@ -90,20 +95,29 @@ function renderWindPanel() {
   const c = map.getCenter();
   const atBoat = boat.active && boat.last != null;
   const here = atBoat ? { lat: boat.last!.lat, lon: boat.last!.lon } : { lat: c.lat, lon: c.lng };
-  const w = windAt(wind, windHour, here.lat, here.lon);
-  const kn = Math.round(w.speed);
-  let trend = '';
-  if (windHour + 3 < wind.times.length) {
-    const later = Math.round(windAt(wind, windHour + 3, here.lat, here.lon).speed);
-    trend = later - kn >= 3 ? `, forcit (${later} kn dans 3 h)` : kn - later >= 3 ? `, mollit (${later} kn dans 3 h)` : ', stable sur 3 h';
+  const w = inForecast(wind, here.lat, here.lon) ? windAt(wind, windHour, here.lat, here.lon) : null;
+  const expired = Date.now() - wind.times.at(-1)! > 3600_000; // prévision gardée mais dépassée
+  if (!w) {
+    $('wind-main').textContent = 'Hors zone de prévision';
+    $('wind-sub').textContent = '';
+  } else {
+    const kn = Math.round(w.speed);
+    let trend = '';
+    const later = windHour + 3 < wind.times.length ? windAt(wind, windHour + 3, here.lat, here.lon) : null;
+    if (later) {
+      const k3 = Math.round(later.speed);
+      trend = k3 - kn >= 3 ? `, forcit (${k3} kn dans 3 h)` : kn - k3 >= 3 ? `, mollit (${k3} kn dans 3 h)` : ', stable sur 3 h';
+    }
+    $('wind-main').textContent = `${kn} kn ${compass(w.dir)} · rafales ${Math.round(w.gust)} · F${beaufort(kn)}`;
+    const sail = atBoat && boat.last!.cog != null ? ` · ${pointOfSail(w.dir, boat.last!.cog)}` : '';
+    $('wind-sub').textContent = `${expired ? 'PRÉVISION DÉPASSÉE · ' : ''}${atBoat ? 'au bateau' : 'au centre'}${trend}${sail}`;
   }
-  const covered = inForecast(wind, here.lat, here.lon);
-  $('wind-main').textContent = covered ? `${kn} kn ${compass(w.dir)} · rafales ${Math.round(w.gust)} · F${beaufort(kn)}` : 'Hors zone de prévision';
-  const sail = atBoat && boat.last!.cog != null ? ` · ${pointOfSail(w.dir, boat.last!.cog)}` : '';
-  $('wind-sub').textContent = covered ? `${atBoat ? 'au bateau' : 'au centre'}${trend}${sail}` : '';
   // L'aiguille montre où va le vent (comme les flèches de la carte)
-  $('wind-needle').style.transform = `rotate(${(w.dir + 180) % 360}deg)`;
-  $('windpanel').style.setProperty('--wind', windColourFor(kn, settings.night));
+  $('wind-dial').style.visibility = w ? 'visible' : 'hidden';
+  if (w) {
+    $('wind-needle').style.transform = `rotate(${(w.dir + 180) % 360}deg)`;
+    $('windpanel').style.setProperty('--wind', windColourFor(Math.round(w.speed), settings.night));
+  }
   const t = new Date(wind.times[windHour]);
   const day = t.toLocaleDateString('fr-BE', { weekday: 'short', day: '2-digit', month: '2-digit' });
   const hour = t.toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' });
@@ -111,8 +125,12 @@ function renderWindPanel() {
   $('time-label').textContent = `${day} ${hour} · prévision KNMI${age >= 1 ? ` d’il y a ${age} h` : ''}`;
 }
 
-timeRange.addEventListener('input', () => { windHour = Number(timeRange.value); renderWind(); });
-$('time-now').onclick = () => { if (wind) { windHour = nearestHour(wind, Date.now()); timeRange.value = String(windHour); renderWind(); } };
+timeRange.addEventListener('input', () => {
+  windHour = Number(timeRange.value);
+  windLive = !!wind && windHour === nearestHour(wind, Date.now());
+  renderWind();
+});
+$('time-now').onclick = () => { windLive = true; updateWind(); };
 $('wind-btn').onclick = () => {
   settings = { ...settings, windLayer: !settings.windLayer };
   saveSettings(settings);
@@ -121,7 +139,8 @@ $('wind-btn').onclick = () => {
   updateWind();
 };
 map.on('moveend', renderWind);
-setInterval(() => { if (settings.windLayer) updateWind(); }, 3600_000);
+// Toutes les 10 min : suivre l'heure courante (et recharger la prévision si elle a plus de 3 h)
+setInterval(() => { if (settings.windLayer) updateWind(); }, 600_000);
 
 async function loadChart() {
   remote = await remoteManifest();
@@ -131,7 +150,12 @@ async function loadChart() {
     current = null;
     toast(`Lecture de la carte impossible : ${(err as Error).message}`, 8000);
   }
+  // Libérer l'ancienne carte (ex. passage en ligne → hors-ligne, ou carte supprimée)
+  for (const k of [...protocol.tiles.keys()]) if (k !== current?.pm.source.getKey()) protocol.tiles.delete(k);
   if (!current) {
+    sourceUrl = styledSource = '';
+    map.setStyle({ version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#cfd3d6' } }] });
+    updateEditionUi();
     $('edition').textContent = 'carte indisponible hors connexion : téléchargez-la une fois en ligne';
     toast('Pas de carte : connectez-vous pour la télécharger.');
     return;
@@ -191,10 +215,14 @@ const esc = (s: string) => s.replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt
 // ---------- bateau ----------
 let following = false;
 let recording: Track | null = null;
-let alarmAcked = false;
 let wakeLock: WakeLockSentinel | null = null;
 
-const boat = new Boat(onFix, (msg) => { toast(msg); setLocateUi(); });
+const boat = new Boat(onFix, (msg) => {
+  toast(msg);
+  if (!boat.active) { following = false; keepAwake(!!recording); } // permission refusée : GPS arrêté
+  setLocateUi();
+});
+let zoomOnFirstFix = false;
 
 let coarseWarned = false;
 let coarseCount = 0;
@@ -207,6 +235,7 @@ function onFix(f: Fix) {
     toast(`Position approximative (±${Math.round(f.acc)} m) : le téléphone ne donne pas la position exacte à ce navigateur. Android : Paramètres → Applications → ${browserName()} → Autorisations → Position → « Utiliser la position exacte ».`, 15000);
   }
   renderBoat(f);
+  if (zoomOnFirstFix) { zoomOnFirstFix = false; map.jumpTo({ zoom: Math.max(map.getZoom(), 13) }); }
   if (settings.windLayer && !following) renderWindPanel(); // en suivi, moveend s'en charge
   $('instruments').hidden = false;
   $('sog').textContent = f.sog.toFixed(1);
@@ -232,20 +261,40 @@ function renderBoat(f: Fix) {
 }
 
 /** Alarme si la position, ou le vecteur d'anticipation, entre dans une zone moins profonde que le contour de sécurité. */
-const ALARM_MAX_ACC_M = 50; // au-delà, la position ne permet pas de juger des hauts-fonds
-let imprecisionWarned = false;
+const ALARM_MAX_ACC_M = 50;  // au-delà, la position ne permet pas de juger des hauts-fonds
+const ALARM_MIN_ZOOM = 12;   // en dessous, géométries trop simplifiées et dangers absents des tuiles
 
+/** Danger isolé : sonde ≤ contour de sécurité, ou sans sonde mais découvrant / émergé. Même règle que `dangerous` dans style.ts. */
+function isDangerous(p: Props, safety: number): boolean {
+  if (p.VALSOU != null) return Number(p.VALSOU) <= safety;
+  return ['1', '2', '4', '5'].includes(String(p.WATLEV ?? ''));
+}
+
+function setAlarmStatus(text: string, suspended: boolean) {
+  const el = $('alarm-status');
+  el.textContent = text;
+  el.classList.toggle('suspended', suspended);
+}
+
+/**
+ * Alarme si la position, ou le vecteur d'anticipation, entre dans une zone moins profonde que le
+ * contour de sécurité, sur la terre / une zone non hydrographiée, ou près d'un danger isolé.
+ * Quand le contrôle est impossible (position imprécise, zoom trop faible, hors écran), l'état est
+ * affiché comme suspendu et une alarme en cours n'est pas effacée.
+ */
 function checkShallows(f: Fix) {
-  if (!map.getLayer('depare')) return;
+  if (!boat.active || !map.getLayer('depare')) return; // GPS arrêté entre-temps
+  if (!map.isStyleLoaded()) { map.once('idle', () => checkShallows(boat.last ?? f)); return; }
   if (f.acc > ALARM_MAX_ACC_M) {
     $('depth').textContent = '?';
     $('instruments').classList.remove('shallow');
-    setAlarm(null);
-    if (!imprecisionWarned) { imprecisionWarned = true; toast(`Alarme hauts-fonds suspendue : position trop imprécise (±${Math.round(f.acc)} m).`, 6000); }
+    setAlarmStatus(`Alarme suspendue : position imprécise (±${Math.round(f.acc)} m)`, true);
     return;
   }
-  imprecisionWarned = false;
-  if (!map.isStyleLoaded()) { map.once('idle', () => checkShallows(f)); return; } // style en cours de rechargement
+  if (map.getZoom() < ALARM_MIN_ZOOM) {
+    setAlarmStatus(`Alarme suspendue : zoomer davantage (niveau ${ALARM_MIN_ZOOM} minimum)`, true);
+    return;
+  }
   const safety = safetyDepth(settings);
   const pts = [{ lat: f.lat, lon: f.lon }];
   if (f.cog != null && f.sog > 0.4 && settings.lookAheadMin > 0) {
@@ -255,10 +304,13 @@ function checkShallows(f: Fix) {
   const canvas = map.getCanvas();
   let hereMin: number | null = null;
   let hereMax: number | null = null;
-  let danger: string | null = null;
+  let offscreen = 0;
+  let alarm: { level: number; msg: string } | null = null;
+  const raise = (level: number, msg: string) => { if (!alarm || level > alarm.level) alarm = { level, msg }; };
+  const ahead = `droit devant (< ${settings.lookAheadMin} min)`;
   pts.forEach((p, i) => {
     const px = map.project([p.lon, p.lat]);
-    if (px.x < 0 || px.y < 0 || px.x > canvas.clientWidth || px.y > canvas.clientHeight) return;
+    if (px.x < 0 || px.y < 0 || px.x > canvas.clientWidth || px.y > canvas.clientHeight) { offscreen++; return; }
     const areas = map.queryRenderedFeatures(px, { layers: ['depare'] });
     const d1 = areas.map((a) => Number(a.properties.DRVAL1)).filter((v) => !Number.isNaN(v));
     if (i === 0 && d1.length) {
@@ -266,53 +318,75 @@ function checkShallows(f: Fix) {
       const d2 = areas.map((a) => Number(a.properties.DRVAL2)).filter((v) => !Number.isNaN(v));
       hereMax = d2.length ? Math.max(...d2) : null;
     }
-    if (!danger && d1.length && Math.min(...d1) < safety) {
-      danger = i === 0 ? `Haut-fond sous le bateau (${depthText(Math.min(...d1))})` : `Haut-fond droit devant (${depthText(Math.min(...d1))}, < ${settings.lookAheadMin} min)`;
+    if (d1.length && Math.min(...d1) < safety) {
+      raise(i === 0 ? 3 : 1, i === 0 ? `Haut-fond sous le bateau (${depthText(Math.min(...d1))})` : `Haut-fond ${ahead} (${depthText(Math.min(...d1))})`);
+    } else if (!d1.length) {
+      // Pas de zone de profondeur : terre, digue ou zone non hydrographiée
+      const other = map.queryRenderedFeatures(px, { layers: ['lndare', 'unsare'].filter((l) => map.getLayer(l)) });
+      const land = other.some((o) => o.properties.objl === 'LNDARE');
+      if (i > 0 && other.length) raise(1, `${land ? 'Terre' : 'Zone non hydrographiée'} ${ahead}`);
+      else if (i === 0 && !land && other.length) raise(2, 'Zone non hydrographiée sous le bateau');
     }
-    if (!danger && map.getLayer('dangers')) {
-      const near = map.queryRenderedFeatures([[px.x - 10, px.y - 10], [px.x + 10, px.y + 10]], { layers: ['dangers'] });
-      const hit = near.find((n) => n.properties.VALSOU != null && Number(n.properties.VALSOU) <= safety);
-      if (hit) danger = `Danger isolé ${i === 0 ? 'à proximité' : 'droit devant'} (${depthText(Number(hit.properties.VALSOU))})`;
+    const near = map.queryRenderedFeatures([[px.x - 10, px.y - 10], [px.x + 10, px.y + 10]], { layers: ['alarm-dangers'] });
+    const hit = near.find((n) => isDangerous(n.properties as Props, safety));
+    if (hit) {
+      const v = hit.properties.VALSOU;
+      raise(2, `Danger isolé ${i === 0 ? 'à proximité' : ahead}${v != null ? ` (${depthText(Number(v))})` : ''}`);
     }
   });
   $('depth').textContent = hereMin == null ? '–'
     : hereMax != null && hereMax <= 0 ? 'estran'
     : hereMax != null ? `${fmt(Math.max(0, hereMin))}–${fmt(hereMax)}` : fmt(hereMin);
   $('instruments').classList.toggle('shallow', hereMin != null && hereMin < safety);
-  setAlarm(danger);
+  if (offscreen === pts.length) { setAlarmStatus('Alarme suspendue : bateau hors de l’écran', true); return; }
+  setAlarmStatus(offscreen ? 'Alarme partielle : vecteur d’anticipation hors de l’écran' : `Alarme active (sécurité ${fmt(safety)} m)`, offscreen > 0);
+  setAlarm(alarm);
 }
 
 const fmt = (v: number) => v.toLocaleString('fr-BE');
 // Profondeur négative = hauteur découvrante (au-dessus du zéro des cartes)
 const depthText = (v: number) => (v < 0 ? `découvre jusqu’à ${fmt(-v)} m` : `${fmt(v)} m`);
 
+// Son de l'alarme : le contexte audio doit être créé/débloqué lors d'un geste (iOS, Safari)
 let audio: AudioContext | null = null;
-function setAlarm(msg: string | null) {
+function unlockAudio() {
+  try {
+    audio ??= new AudioContext();
+    if (audio.state === 'suspended') audio.resume();
+  } catch { /* audio indisponible */ }
+}
+
+// Niveau acquitté : une alarme plus grave (1 droit devant < 2 danger < 3 sous le bateau) sonne à nouveau
+let ackedLevel = 0;
+let shownLevel = 0;
+function setAlarm(a: { level: number; msg: string } | null) {
   const el = $('alarm');
-  if (!msg) {
+  if (!a) {
     el.hidden = true;
-    alarmAcked = false;
+    ackedLevel = shownLevel = 0;
     return;
   }
-  $('alarm-text').textContent = msg;
-  if (alarmAcked) return;
-  const wasHidden = el.hidden;
+  $('alarm-text').textContent = a.msg;
+  if (a.level <= ackedLevel) return;
   el.hidden = false;
-  if (wasHidden) {
+  if (a.level > shownLevel) {
+    shownLevel = a.level;
     navigator.vibrate?.([300, 120, 300]);
     try {
-      audio ??= new AudioContext();
-      const o = audio.createOscillator();
-      const g = audio.createGain();
-      o.frequency.value = 880;
-      g.gain.value = 0.2;
-      o.connect(g).connect(audio.destination);
-      o.start();
-      o.stop(audio.currentTime + 0.5);
+      if (audio) {
+        if (audio.state === 'suspended') audio.resume();
+        const o = audio.createOscillator();
+        const g = audio.createGain();
+        o.frequency.value = 880;
+        g.gain.value = 0.2;
+        o.connect(g).connect(audio.destination);
+        o.start();
+        o.stop(audio.currentTime + 0.5);
+      }
     } catch { /* audio indisponible */ }
   }
 }
-$('alarm-ack').onclick = () => { alarmAcked = true; $('alarm').hidden = true; };
+$('alarm-ack').onclick = () => { ackedLevel = shownLevel; $('alarm').hidden = true; };
 
 // Bouton position : 1er appui = GPS + suivi ; appui suivant = suivi on/off ; appui long = arrêt du GPS
 const locateBtn = $('locate-btn');
@@ -323,12 +397,13 @@ function setLocateUi() {
 let suppressClick = false;
 locateBtn.onclick = async () => {
   if (suppressClick) { suppressClick = false; return; } // fin d'un appui long
+  unlockAudio(); // geste utilisateur : permet le son de l'alarme sur iOS
   if (!boat.active) {
-    boat.start();
     following = true;
+    zoomOnFirstFix = true;
+    boat.start();
     await keepAwake(true);
-    if (boat.last) map.easeTo({ center: [boat.last.lon, boat.last.lat], zoom: Math.max(map.getZoom(), 13) });
-    toast('GPS activé. Appui long pour l’arrêter.');
+    if (boat.active) toast('GPS activé. Appui long pour l’arrêter.');
   } else {
     following = !following;
     if (following && boat.last) map.easeTo({ center: [boat.last.lon, boat.last.lat] });
@@ -337,12 +412,14 @@ locateBtn.onclick = async () => {
 };
 let pressTimer = 0;
 locateBtn.addEventListener('pointerdown', () => {
+  suppressClick = false; // un appui long sans « click » ne doit pas avaler le tap suivant
   pressTimer = window.setTimeout(() => {
     boat.stop();
     following = false;
     keepAwake(!!recording);
     $('instruments').hidden = true;
     setAlarm(null);
+    setAlarmStatus('', false);
     (map.getSource('boat') as GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features: [] });
     if (settings.windLayer) renderWindPanel();
     setLocateUi();
@@ -391,6 +468,7 @@ async function toggleRecording() {
   } else {
     const now = new Date();
     recording = { id: now.getTime(), name: `Trace ${now.toLocaleString('fr-BE', { dateStyle: 'short', timeStyle: 'short' })}`, points: [] };
+    unlockAudio();
     if (!boat.active) { boat.start(); setLocateUi(); }
     keepAwake(true);
   }
@@ -399,11 +477,14 @@ async function toggleRecording() {
   refreshTracks();
 }
 
+let tracksGen = 0;
 async function refreshTracks() {
   $('track-toggle').textContent = recording ? 'Arrêter l’enregistrement' : 'Démarrer l’enregistrement';
+  const gen = ++tracksGen;
+  const tracks = (await listTracks()).sort((a, b) => b.id - a.id);
+  if (gen !== tracksGen) return; // un appel plus récent remplit la liste
   const list = $('track-list');
   list.innerHTML = '';
-  const tracks = (await listTracks()).sort((a, b) => b.id - a.id);
   for (const t of tracks) {
     const li = document.createElement('li');
     li.innerHTML = `<span>${esc(t.name)}<br><small>${trackNm(t.points).toFixed(1)} M · ${t.points.length} pts</small></span>`;
@@ -453,8 +534,8 @@ fillSettings();
 
 // ---------- carte hors-ligne ----------
 const mb = (b: number) => `${(b / 1e6).toFixed(0)} Mo`;
-function refreshChartDialog() {
-  const local = offlineManifest();
+async function refreshChartDialog() {
+  const local = await offlineManifest();
   const st = $('chart-status');
   const dl = $<HTMLButtonElement>('chart-download');
   const del = $<HTMLButtonElement>('chart-delete');
@@ -478,7 +559,7 @@ function refreshChartDialog() {
 }
 $('chart-btn').onclick = async () => {
   remote = (await remoteManifest()) ?? remote;
-  refreshChartDialog();
+  await refreshChartDialog();
   $<HTMLDialogElement>('chart-dlg').showModal();
 };
 $('chart-download').onclick = async () => {
@@ -507,6 +588,11 @@ $('chart-delete').onclick = async () => {
 };
 
 // ---------- divers ----------
+$('update-btn').onclick = async () => {
+  if (recording) await saveTrack(recording);
+  if (boat.active && !confirm('Mettre à jour maintenant ? Le GPS et l’alarme seront relancés à la main.')) return;
+  updateSW(true);
+};
 $('about-btn').onclick = () => { renderGpsDiag(); $<HTMLDialogElement>('about-dlg').showModal(); };
 
 function renderGpsDiag() {
@@ -544,6 +630,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 window.addEventListener('pagehide', () => { if (recording) saveTrack(recording); });
 
 loadChart();
+updateWind();
 
 // Accès console pour le débogage
 Object.assign(window, { map });

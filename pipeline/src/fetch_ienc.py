@@ -20,7 +20,8 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 CATALOG = "https://raw.githubusercontent.com/chartcatalogs/catalogs/master/NL_IENC_Catalog.xml"
-AREAS = {"zeeland": "Zeeland", "waddenzee": "Waddenzee", "nederland": "Nederland"}
+# Préfixe exact du titre de catalogue : « Zeeland met Diepte » (avec bathymétrie), pas un autre produit Zélande
+AREAS = {"zeeland": "Zeeland met Diepte", "waddenzee": "Waddenzee", "nederland": "Nederland"}
 
 
 def charts():
@@ -51,6 +52,8 @@ def main():
     match = [c for c in items if c["title"].startswith(AREAS[a.area])]
     if not match:
         sys.exit(f"zone {a.area} absente du catalogue")
+    if len(match) > 1:
+        sys.exit(f"plusieurs entrées « {AREAS[a.area]} » dans le catalogue : " + " | ".join(c["title"] for c in match))
     c = match[0]
     if a.date:
         print(c["date"])

@@ -4,16 +4,16 @@
 export interface WindForecast {
   fetched: number;               // horodatage de la récupération
   times: number[];               // instants (ms, UTC)
-  points: { lat: number; lon: number; speed: number[]; dir: number[]; gust: number[] }[];
+  points: { lat: number; lon: number; speed: (number | null)[]; dir: (number | null)[]; gust: (number | null)[] }[]; // null = pas de donnée
 }
 
 const KEY = 'zn.wind';
 const MAX_AGE_MS = 3 * 3600_000; // au-delà : on tente de rafraîchir
 
-// Grille 0,1° × 0,1° sur l'emprise de la carte (8 × 15 = 120 points)
+// Grille 0,1° × 0,1° couvrant l'emprise de la carte (51,2–51,9 °N × 3,15–4,55 °E : 8 × 15 = 120 points)
 function grid(): { lat: number; lon: number }[] {
   const pts = [];
-  for (let lat = 51.2; lat <= 51.85; lat += 0.1) for (let lon = 3.15; lon <= 4.55; lon += 0.1) pts.push({ lat: +lat.toFixed(2), lon: +lon.toFixed(2) });
+  for (let i = 0; i < 8; i++) for (let j = 0; j < 15; j++) pts.push({ lat: +(51.2 + i * 0.1).toFixed(2), lon: +(3.15 + j * 0.1).toFixed(2) });
   return pts;
 }
 
@@ -52,9 +52,10 @@ export async function loadWind(force = false): Promise<WindForecast | null> {
       points: data.map((d, i) => ({
         lat: pts[i].lat,
         lon: pts[i].lon,
-        speed: d.hourly.wind_speed_10m.map((v) => Math.round(v ?? 0)),
-        dir: d.hourly.wind_direction_10m.map((v) => Math.round(v ?? 0)),
-        gust: d.hourly.wind_gusts_10m.map((v) => Math.round(v ?? 0)),
+        // valeur manquante gardée comme inconnue (jamais transformée en calme)
+        speed: d.hourly.wind_speed_10m.map((v) => (v == null ? null : Math.round(v))),
+        dir: d.hourly.wind_direction_10m.map((v) => (v == null ? null : Math.round(v))),
+        gust: d.hourly.wind_gusts_10m.map((v) => (v == null ? null : Math.round(v))),
       })),
     };
     try {
@@ -108,7 +109,7 @@ export function inForecast(fc: WindForecast, lat: number, lon: number): boolean 
  * Vent interpolé en un point (bilinéaire sur la grille, en composantes u/v pour éviter le saut
  * 359° → 0°). Hors grille : valeur du bord le plus proche (voir inForecast).
  */
-export function windAt(fc: WindForecast, hour: number, lat: number, lon: number): Wind {
+export function windAt(fc: WindForecast, hour: number, lat: number, lon: number): Wind | null {
   const { lats, lons } = axes(fc);
   const at = (i: number, j: number) => fc.points[i * lons.length + j];
   const pos = (v: number, axis: number[]) => {
@@ -118,14 +119,19 @@ export function windAt(fc: WindForecast, hour: number, lat: number, lon: number)
   };
   const [i, fy] = pos(lat, lats);
   const [j, fx] = pos(lon, lons);
-  let u = 0, v = 0, gust = 0;
+  let u = 0, v = 0, gust = 0, wsum = 0;
   for (const [di, dj, w] of [[0, 0, (1 - fy) * (1 - fx)], [0, 1, (1 - fy) * fx], [1, 0, fy * (1 - fx)], [1, 1, fy * fx]] as const) {
     const p = at(i + di, j + dj);
-    const r = (p.dir[hour] * Math.PI) / 180;
-    u += w * p.speed[hour] * Math.sin(r);
-    v += w * p.speed[hour] * Math.cos(r);
-    gust += w * p.gust[hour];
+    const sp = p.speed[hour], dir = p.dir[hour], gu = p.gust[hour];
+    if (sp == null || dir == null || w === 0) continue; // point sans donnée : ignoré
+    const r = (dir * Math.PI) / 180;
+    u += w * sp * Math.sin(r);
+    v += w * sp * Math.cos(r);
+    gust += w * (gu ?? sp);
+    wsum += w;
   }
+  if (wsum === 0) return null;
+  u /= wsum; v /= wsum; gust /= wsum;
   return { speed: Math.hypot(u, v), dir: ((Math.atan2(u, v) * 180) / Math.PI + 360) % 360, gust };
 }
 
@@ -140,6 +146,7 @@ export function windScreenGrid(
       const { lng, lat } = unproject(x, y);
       if (!inForecast(fc, lat, lng)) continue;
       const w = windAt(fc, hour, lat, lng);
+      if (!w) continue;
       features.push({
         type: 'Feature',
         properties: { speed: Math.round(w.speed), gust: Math.round(w.gust), to: (w.dir + 180) % 360 },
