@@ -452,7 +452,22 @@ $('chart-delete').onclick = async () => {
 };
 
 // ---------- divers ----------
-$('about-btn').onclick = () => $<HTMLDialogElement>('about-dlg').showModal();
+$('about-btn').onclick = () => { renderGpsDiag(); $<HTMLDialogElement>('about-dlg').showModal(); };
+
+function renderGpsDiag() {
+  const h = boat.history;
+  const list = $('gps-diag-list');
+  list.innerHTML = '';
+  if (!h.length) return;
+  const sat = h.filter((f) => f.alt).length;
+  $('gps-diag-text').textContent = `${browserName()} · ${h.length} dernières positions, dont ${sat} avec altitude (fix satellite). `
+    + (sat === 0 ? 'Aucune ne vient des satellites : sortir à ciel ouvert et attendre 1 min ; si rien ne change, le navigateur ne reçoit pas le GPS du téléphone (essayer Chrome pour comparer).' : 'Le GPS satellite est bien reçu.');
+  for (const f of h) {
+    const li = document.createElement('li');
+    li.textContent = `${new Date(f.t).toLocaleTimeString('fr-BE')} · ±${Math.round(f.acc)} m · ${f.alt ? 'satellite' : 'réseau/approx.'}${f.speed ? ' · vitesse fournie' : ''}`;
+    list.append(li);
+  }
+}
 $('app-version').textContent = `Version ${__APP_VERSION__}`;
 
 function browserName() {

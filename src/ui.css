@@ -85,6 +85,8 @@ dialog button:disabled { opacity: 0.5; }
 dialog .hint, dialog .small { color: var(--muted); font-size: 13px; margin: 0; }
 dialog .legal { border-left: 3px solid var(--danger); padding-left: 10px; }
 dialog progress { width: 100%; }
+#gps-diag summary { cursor: pointer; font-size: 14px; }
+#gps-diag-list { margin: 4px 0 0; padding-left: 18px; }
 #track-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
 #track-list li { display: flex; gap: 8px; align-items: center; justify-content: space-between; border-top: 1px solid var(--border); padding-top: 6px; }
 #track-list li button { padding: 4px 10px; font-size: 13px; }

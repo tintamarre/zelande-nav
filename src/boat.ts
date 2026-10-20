@@ -15,8 +15,12 @@ const MIN_SPEED_KN = 0.4; // en dessous : cap non significatif
 const MAX_ACC_M = 30;     // au-delà (localisation réseau/wifi) : pas de vitesse calculée entre positions
 const MAX_SPEED_KN = 40;  // au-delà : valeur aberrante pour un voilier, ignorée
 
+/** Résumé d'une position brute reçue, pour le diagnostic GPS. */
+export interface RawFix { t: number; acc: number; alt: boolean; speed: boolean }
+
 export class Boat {
   private watchId: number | null = null;
+  readonly history: RawFix[] = [];
   private prev: Fix | null = null;
   last: Fix | null = null;
 
@@ -42,6 +46,9 @@ export class Boat {
   private update(p: GeolocationPosition) {
     const { latitude: lat, longitude: lon, accuracy: acc, speed, heading } = p.coords;
     const t = p.timestamp;
+    // Une altitude est fournie par un fix satellite, pas par une position réseau/antenne
+    this.history.unshift({ t, acc, alt: p.coords.altitude != null, speed: speed != null && !Number.isNaN(speed) });
+    this.history.length = Math.min(this.history.length, 12);
     let sog: number;
     let cog: number | null;
     if (speed != null && !Number.isNaN(speed)) {
