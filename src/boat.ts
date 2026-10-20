@@ -31,6 +31,7 @@ export class Boat {
   start() {
     if (this.watchId !== null) return;
     if (!('geolocation' in navigator)) return this.onError('GPS indisponible sur cet appareil');
+    this.last = this.prev = null; // ne pas réutiliser la position d'une session précédente
     this.watchId = navigator.geolocation.watchPosition(
       (p) => this.update(p),
       (e) => this.onError(e.code === e.PERMISSION_DENIED ? 'Accès à la position refusé' : 'Position indisponible'),

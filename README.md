@@ -58,6 +58,11 @@ Le GPS du navigateur exige HTTPS (ou `localhost`). Pour tester sur un téléphon
 - La carte se télécharge explicitement (bouton ⬇, ~50 Mo) dans le Cache Storage ; elle est lue par tranches (`Blob.slice`) sans réseau. Une seule édition est gardée ; l'app signale quand une plus récente est publiée.
 - Sans téléchargement, la carte est lue en ligne par requêtes Range.
 
+## Couches optionnelles
+
+- **Vent** (bouton vent de la barre d'outils) : prévision KNMI HARMONIE via Open-Meteo (CC-BY 4.0), grille de 0,1° sur la Zélande, interpolée pour afficher des flèches à tout zoom ; bandeau avec force, rafales, Beaufort, tendance sur 3 h et allure/amure d'après le cap fond. La dernière prévision est gardée sur l'appareil (consultation hors-ligne). Pas de flèche hors de la grille de prévision.
+- **Courants** : pas encore. Le modèle marin d'Open-Meteo (~8 km) ne résout pas les bras de mer ; piste retenue : Copernicus Marine North West Shelf (~1,5 km), qui demande un compte.
+
 ## Mobile
 
-L'app est une PWA installable (Android : Chrome → « Installer l'application » ; iOS : Safari → Partager → « Sur l'écran d'accueil »). Limites connues : pas de GPS en arrière-plan écran éteint (l'app garde l'écran allumé pendant le suivi via Wake Lock). Pour le GPS en arrière-plan ou une diffusion sur les stores, envelopper l'app avec Capacitor (les chemins sont déjà relatifs, `base: './'`).
+L'app est une PWA installable (Android : Chrome → « Installer l'application » ; iOS : Safari → Partager → « Sur l'écran d'accueil »). Utiliser **Chrome** sur Android : Firefox Android peut ne transmettre qu'une position réseau approximative (±1-2 km) même avec la permission « position exacte » ; l'app suspend alors l'alarme hauts-fonds et le signale (diagnostic dans « À propos »). Limites connues : pas de GPS en arrière-plan écran éteint (l'app garde l'écran allumé pendant le suivi via Wake Lock). Pour le GPS en arrière-plan ou une diffusion sur les stores, envelopper l'app avec Capacitor (les chemins sont déjà relatifs, `base: './'`).

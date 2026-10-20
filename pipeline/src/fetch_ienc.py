@@ -58,18 +58,22 @@ def main():
     os.makedirs(a.dest, exist_ok=True)
     zpath = os.path.join(a.dest, f"{a.area}.zip")
     meta_path = os.path.join(a.dest, f"{a.area}.json")
-    if os.path.exists(meta_path) and json.load(open(meta_path)).get("date") == c["date"] and os.path.isdir(os.path.join(a.dest, a.area)):
-        print(f"déjà à jour ({c['date']})")
-        return
+    if os.path.exists(meta_path) and os.path.isdir(os.path.join(a.dest, a.area)):
+        with open(meta_path) as f:
+            if json.load(f).get("date") == c["date"]:
+                print(f"déjà à jour ({c['date']})")
+                return
     print(f"téléchargement {c['title']} ({c['date']})")
-    urllib.request.urlretrieve(c["url"], zpath)
+    with urllib.request.urlopen(c["url"], timeout=300) as r, open(zpath, "wb") as f:
+        shutil.copyfileobj(r, f)
     out = os.path.join(a.dest, a.area)
     # Le ZIP contient un dossier par semaine : vider l'ancienne édition pour ne pas doubler les cellules
     shutil.rmtree(out, ignore_errors=True)
     with zipfile.ZipFile(zpath) as z:
         z.extractall(out)
     os.remove(zpath)
-    json.dump(c, open(meta_path, "w"), ensure_ascii=False, indent=1)
+    with open(meta_path, "w") as f:
+        json.dump(c, f, ensure_ascii=False, indent=1)
     cells = [f for _, _, fs in os.walk(out) for f in fs if f.endswith(".000")]
     print(f"{len(cells)} cellules .000 extraites dans {out}")
 

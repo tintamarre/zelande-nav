@@ -36,7 +36,7 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,pbf,txt}'],
         globIgnores: ['tiles/**'],
         maximumFileSizeToCacheInBytes: 3_000_000,
-        navigateFallbackDenylist: [/^\/tiles\//],
+        navigateFallbackDenylist: [/\/tiles\//], // l'app peut être servie dans un sous-dossier
       },
     }),
   ],

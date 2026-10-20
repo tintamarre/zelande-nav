@@ -77,13 +77,39 @@ export function nearestHour(fc: WindForecast, t: number): number {
 
 export interface Wind { speed: number; dir: number; gust: number }
 
+/** Échelle de couleur du vent (nœuds → couleur), partagée par la carte et le bandeau. */
+export const WIND_SCALE: [number, string][] = [[0, '#2f7fd8'], [11, '#1f9e3a'], [17, '#e0a000'], [22, '#e05a00'], [28, '#d11a1a'], [34, '#9b00b0']];
+export const WIND_SCALE_NIGHT: [number, string][] = [[0, '#4a5a70'], [11, '#4a6a48'], [17, '#7a6a30'], [22, '#7a4a28'], [28, '#7a2a2a'], [34, '#6a2a70']];
+export const windColourFor = (kn: number, night = false) =>
+  (night ? WIND_SCALE_NIGHT : WIND_SCALE).reduce((c, [min, col]) => (kn >= min ? col : c), WIND_SCALE[0][1]);
+
+// Axes de la grille (latitudes, longitudes triées), calculés une fois par prévision
+const axesCache = new WeakMap<WindForecast, { lats: number[]; lons: number[] }>();
+function axes(fc: WindForecast) {
+  let a = axesCache.get(fc);
+  if (!a) {
+    a = {
+      lats: [...new Set(fc.points.map((p) => p.lat))].sort((x, y) => x - y),
+      lons: [...new Set(fc.points.map((p) => p.lon))].sort((x, y) => x - y),
+    };
+    axesCache.set(fc, a);
+  }
+  return a;
+}
+
+/** Vrai si le point est couvert par la grille de prévision (marge d'une demi-maille). */
+export function inForecast(fc: WindForecast, lat: number, lon: number): boolean {
+  const { lats, lons } = axes(fc);
+  const h = (lats[1] - lats[0]) / 2;
+  return lat >= lats[0] - h && lat <= lats.at(-1)! + h && lon >= lons[0] - h && lon <= lons.at(-1)! + h;
+}
+
 /**
- * Vent interpolé en un point quelconque (bilinéaire sur la grille, en composantes u/v pour
- * éviter le saut 359° → 0°). Hors grille : valeur du bord le plus proche.
+ * Vent interpolé en un point (bilinéaire sur la grille, en composantes u/v pour éviter le saut
+ * 359° → 0°). Hors grille : valeur du bord le plus proche (voir inForecast).
  */
 export function windAt(fc: WindForecast, hour: number, lat: number, lon: number): Wind {
-  const lats = [...new Set(fc.points.map((p) => p.lat))].sort((a, b) => a - b);
-  const lons = [...new Set(fc.points.map((p) => p.lon))].sort((a, b) => a - b);
+  const { lats, lons } = axes(fc);
   const at = (i: number, j: number) => fc.points[i * lons.length + j];
   const pos = (v: number, axis: number[]) => {
     const f = Math.min(Math.max((v - axis[0]) / (axis[1] - axis[0]), 0), axis.length - 1);
@@ -103,7 +129,7 @@ export function windAt(fc: WindForecast, hour: number, lat: number, lon: number)
   return { speed: Math.hypot(u, v), dir: ((Math.atan2(u, v) * 180) / Math.PI + 360) % 360, gust };
 }
 
-/** Points de vent répartis sur l'écran (tous les `spacing` px), pour un affichage à tout zoom. */
+/** Points de vent répartis sur l'écran (tous les `spacing` px), seulement là où la prévision existe. */
 export function windScreenGrid(
   fc: WindForecast, hour: number, width: number, height: number, spacing: number,
   unproject: (x: number, y: number) => { lng: number; lat: number },
@@ -112,6 +138,7 @@ export function windScreenGrid(
   for (let y = spacing / 2; y < height; y += spacing) {
     for (let x = spacing / 2; x < width; x += spacing) {
       const { lng, lat } = unproject(x, y);
+      if (!inForecast(fc, lat, lng)) continue;
       const w = windAt(fc, hour, lat, lng);
       features.push({
         type: 'Feature',
@@ -123,8 +150,9 @@ export function windScreenGrid(
   return { type: 'FeatureCollection', features };
 }
 
+// Limite basse (nœuds) des forces 1 à 12
 const BEAUFORT = [1, 4, 7, 11, 17, 22, 28, 34, 41, 48, 56, 64];
-export const beaufort = (kn: number) => BEAUFORT.findIndex((b) => kn < b) === -1 ? 12 : BEAUFORT.findIndex((b) => kn < b);
+export const beaufort = (kn: number) => BEAUFORT.filter((b) => kn >= b).length;
 
 /** Allure et amure à partir du vent (d'où il vient) et du cap fond. */
 export function pointOfSail(windFrom: number, cog: number): string {

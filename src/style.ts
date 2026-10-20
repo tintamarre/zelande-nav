@@ -2,6 +2,7 @@
 // et l'accentuation des sondes dépendent du contour de sécurité choisi dans les réglages.
 import type { ExpressionSpecification, LayerSpecification, StyleSpecification } from 'maplibre-gl';
 import { type Settings, safetyContour, safetyDepth } from './settings';
+import { WIND_SCALE, WIND_SCALE_NIGHT } from './weather';
 
 const PALETTES = {
   day: {
@@ -59,9 +60,9 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
     ['case', ['has', 'SIGPER'], ['concat', ' ', ['to-string', ['get', 'SIGPER']], 's'], ''],
   ];
 
-  // Échelle de couleur du vent (nœuds) : calme, maniable, frais, fort, coup de vent
-  const windColour: ExpressionSpecification = ['step', ['get', 'speed'],
-    '#2f7fd8', 11, '#1f9e3a', 17, '#e0a000', 22, '#e05a00', 28, '#d11a1a', 34, '#9b00b0'];
+  // Couleur du vent selon la force (palette atténuée la nuit)
+  const scale = s.night ? WIND_SCALE_NIGHT : WIND_SCALE;
+  const windColour = ['step', ['get', 'speed'], scale[0][1], ...scale.slice(1).flat()] as unknown as ExpressionSpecification;
 
   const clearance: ExpressionSpecification = ['coalesce', ['get', 'VERCLR'], ['get', 'VERCCL'], 999];
 
@@ -186,7 +187,10 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
         'icon-rotate': ['get', 'to'], 'icon-rotation-alignment': 'map',
         'icon-size': ['interpolate', ['linear'], ['get', 'speed'], 0, 0.55, 10, 0.8, 25, 1.15],
         'icon-allow-overlap': true, 'icon-ignore-placement': true,
-        'text-field': ['to-string', ['get', 'speed']], 'text-font': ['Noto Sans Medium'], 'text-size': 12,
+        // vitesse moyenne, et rafales si elles dépassent la moyenne d'au moins 5 kn (« 12–19 »)
+        'text-field': ['concat', ['to-string', ['get', 'speed']],
+          ['case', ['>=', ['-', ['get', 'gust'], ['get', 'speed']], 5], ['concat', '–', ['to-string', ['get', 'gust']]], '']],
+        'text-font': ['Noto Sans Medium'], 'text-size': 12,
         'text-offset': [0, 1.7], 'text-allow-overlap': true, 'text-ignore-placement': true,
       },
       paint: { 'text-color': windColour, 'text-halo-color': P.halo, 'text-halo-width': 2, 'icon-opacity': 0.8 } },
