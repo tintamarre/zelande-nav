@@ -59,6 +59,10 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
     ['case', ['has', 'SIGPER'], ['concat', ' ', ['to-string', ['get', 'SIGPER']], 's'], ''],
   ];
 
+  // Échelle de couleur du vent (nœuds) : calme, maniable, frais, fort, coup de vent
+  const windColour: ExpressionSpecification = ['step', ['get', 'speed'],
+    '#2f7fd8', 11, '#1f9e3a', 17, '#e0a000', 22, '#e05a00', 28, '#d11a1a', 34, '#9b00b0'];
+
   const clearance: ExpressionSpecification = ['coalesce', ['get', 'VERCLR'], ['get', 'VERCCL'], 999];
 
   const layers: LayerSpecification[] = [
@@ -174,19 +178,18 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
       layout: { 'text-field': ['concat', 'H ', ['to-string', clearance], ' m'], 'text-font': ['Noto Sans Medium'],
         'text-size': 11, 'symbol-placement': 'point' },
       paint: { 'text-color': ['case', ['<', clearance, air], P.danger, P.text], 'text-halo-color': P.halo, 'text-halo-width': 1.5 } },
-    // --- couche optionnelle : vent (barbules, couleur selon la force) ---
+    // --- couche optionnelle : vent (flèches dans le sens du vent, couleur et taille selon la force) ---
     { id: 'wind', type: 'symbol', source: 'wind',
       layout: {
         visibility: s.windLayer ? 'visible' : 'none',
-        'icon-image': ['concat', 'barb|', ['to-string', ['*', ['round', ['/', ['get', 'speed'], 5]], 5]], '|',
-          ['step', ['get', 'speed'], s.night ? '#9a8a5a' : '#1a1a1a', 16, '#e07b00', 22, '#d11a1a', 28, '#b000b0']],
-        'icon-rotate': ['get', 'dir'], 'icon-rotation-alignment': 'map',
+        'icon-image': ['concat', 'warrow|', windColour],
+        'icon-rotate': ['get', 'to'], 'icon-rotation-alignment': 'map',
+        'icon-size': ['interpolate', ['linear'], ['get', 'speed'], 0, 0.55, 10, 0.8, 25, 1.15],
         'icon-allow-overlap': true, 'icon-ignore-placement': true,
-        'text-field': ['concat', ['to-string', ['get', 'speed']], ['case', ['>=', ['-', ['get', 'gust'], ['get', 'speed']], 5], ['concat', '–', ['to-string', ['get', 'gust']]], '']],
-        'text-font': ['Noto Sans Medium'], 'text-size': 11, 'text-offset': [0, 1.6], 'text-optional': true,
-        'text-allow-overlap': true,
+        'text-field': ['to-string', ['get', 'speed']], 'text-font': ['Noto Sans Medium'], 'text-size': 12,
+        'text-offset': [0, 1.7], 'text-allow-overlap': true, 'text-ignore-placement': true,
       },
-      paint: { 'text-color': P.text, 'text-halo-color': P.halo, 'text-halo-width': 1.5 } },
+      paint: { 'text-color': windColour, 'text-halo-color': P.halo, 'text-halo-width': 2, 'icon-opacity': 0.8 } },
     // --- bateau ---
     { id: 'track', type: 'line', source: 'track', paint: { 'line-color': P.track, 'line-width': 2, 'line-opacity': 0.8 } },
     { id: 'vector', type: 'line', source: 'boat', filter: ['==', ['geometry-type'], 'LineString'],

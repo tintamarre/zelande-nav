@@ -8,7 +8,7 @@ import { deleteOfflineChart, downloadChart, formatEdition, type Manifest, offlin
 import { describe, type Props } from './s57';
 import { type Settings, loadSettings, safetyContour, safetyDepth, saveSettings } from './settings';
 import { buildStyle } from './style';
-import { compass, loadWind, nearestHour, type WindForecast, windGeoJSON } from './weather';
+import { beaufort, compass, loadWind, nearestHour, pointOfSail, type WindForecast, windAt, windScreenGrid } from './weather';
 import { registerSymbols } from './symbols';
 import { type Track, type TrackPoint, deleteTrack, destination, exportGpx, listTracks, saveTrack, trackNm } from './track';
 
@@ -55,35 +55,61 @@ function applyStyle() {
 let wind: WindForecast | null = null;
 let windHour = -1;
 const timeRange = $<HTMLInputElement>('time-range');
+const WIND_COLOURS: [number, string][] = [[34, '#9b00b0'], [28, '#d11a1a'], [22, '#e05a00'], [17, '#e0a000'], [11, '#1f9e3a'], [0, '#2f7fd8']];
 
 async function updateWind(force = false) {
-  $('timebar').hidden = !settings.windLayer;
+  $('windpanel').hidden = !settings.windLayer;
+  $('wind-btn').classList.toggle('on', settings.windLayer);
+  $('wind-btn').setAttribute('aria-pressed', String(settings.windLayer));
   if (!settings.windLayer) return;
   const fc = await loadWind(force);
   if (!fc) { toast('Prévision de vent indisponible (pas de connexion ni de prévision gardée).'); return; }
-  const fresh = fc !== wind;
+  if (fc !== wind || windHour < 0) windHour = nearestHour(fc, Date.now());
   wind = fc;
   timeRange.max = String(fc.times.length - 1);
-  if (fresh || windHour < 0) windHour = nearestHour(fc, Date.now());
   timeRange.value = String(windHour);
   renderWind();
 }
 
+/** Flèches recalculées pour la vue courante : visibles à tout zoom. */
 function renderWind() {
   const src = map.getSource('wind') as GeoJSONSource | undefined;
-  if (!src || !wind || windHour < 0) return;
-  src.setData(windGeoJSON(wind, windHour));
+  if (!src || !wind || windHour < 0 || !settings.windLayer) return;
+  const cv = map.getCanvas();
+  src.setData(windScreenGrid(wind, windHour, cv.clientWidth, cv.clientHeight, 85, (x, y) => map.unproject([x, y])));
+  renderWindPanel();
+}
+
+/** Bandeau : vent au bateau (GPS actif) ou au centre de la carte, tendance, allure. */
+function renderWindPanel() {
+  if (!wind || windHour < 0) return;
+  const here = boat.active && boat.last ? { lat: boat.last.lat, lon: boat.last.lon, where: 'au bateau' } : { ...(({ lat, lng }) => ({ lat, lon: lng }))(map.getCenter()), where: 'au centre' };
+  const w = windAt(wind, windHour, here.lat, here.lon);
+  const later = windAt(wind, Math.min(windHour + 3, wind.times.length - 1), here.lat, here.lon);
+  const kn = Math.round(w.speed);
+  const delta = Math.round(later.speed) - kn;
+  const trend = delta >= 3 ? `forcit (${Math.round(later.speed)} kn dans 3 h)` : delta <= -3 ? `mollit (${Math.round(later.speed)} kn dans 3 h)` : 'stable sur 3 h';
+  $('wind-main').textContent = `${kn} kn ${compass(w.dir)} · rafales ${Math.round(w.gust)} · F${beaufort(w.speed)}`;
+  const sail = boat.active && boat.last?.cog != null ? ` · ${pointOfSail(w.dir, boat.last.cog)}` : '';
+  $('wind-sub').textContent = `${here.where}, ${trend}${sail}`;
+  // L'aiguille montre où va le vent (comme les flèches de la carte)
+  $('wind-needle').style.transform = `rotate(${(w.dir + 180) % 360}deg)`;
+  $('windpanel').style.setProperty('--wind', WIND_COLOURS.find(([min]) => kn >= min)![1]);
   const t = new Date(wind.times[windHour]);
   const day = t.toLocaleDateString('fr-BE', { weekday: 'short', day: '2-digit', month: '2-digit' });
   const hour = t.toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' });
   const age = Math.round((Date.now() - wind.fetched) / 3600_000);
-  // Vent au centre de la carte (point de grille le plus proche)
-  const c = map.getCenter();
-  const near = wind.points.reduce((a, b) => (Math.hypot(b.lat - c.lat, b.lon - c.lng) < Math.hypot(a.lat - c.lat, a.lon - c.lng) ? b : a));
-  $('time-label').textContent = `Vent ${day} ${hour} · centre : ${near.speed[windHour]} kn ${compass(near.dir[windHour])}, rafales ${near.gust[windHour]} kn · prévision KNMI${age >= 1 ? ` d’il y a ${age} h` : ''}`;
+  $('time-label').textContent = `${day} ${hour} · prévision KNMI${age >= 1 ? ` d’il y a ${age} h` : ''}`;
 }
+
 timeRange.addEventListener('input', () => { windHour = Number(timeRange.value); renderWind(); });
-map.on('moveend', () => { if (settings.windLayer) renderWind(); });
+$('time-now').onclick = () => { if (wind) { windHour = nearestHour(wind, Date.now()); timeRange.value = String(windHour); renderWind(); } };
+$('wind-btn').onclick = () => {
+  settings = { ...settings, windLayer: !settings.windLayer };
+  saveSettings(settings);
+  applyStyle();
+};
+map.on('moveend', renderWind);
 setInterval(() => { if (settings.windLayer) updateWind(); }, 3600_000);
 
 async function loadChart() {
@@ -165,6 +191,7 @@ function onFix(f: Fix) {
     toast(`Position approximative (±${Math.round(f.acc)} m) : le téléphone ne donne pas la position exacte à ce navigateur. Android : Paramètres → Applications → ${browserName()} → Autorisations → Position → « Utiliser la position exacte ».`, 15000);
   }
   renderBoat(f);
+  if (settings.windLayer) renderWindPanel();
   $('instruments').hidden = false;
   $('sog').textContent = f.sog.toFixed(1);
   $('cog').textContent = f.cog == null ? '–' : String(Math.round(f.cog)).padStart(3, '0');

@@ -5,6 +5,7 @@
 //   top|<TOPSHP>|<COLOUR>            voyants
 //   light|<COLOUR>                   feux (flamme)
 //   barb|<nœuds arrondis à 5>|<couleur>   barbules de vent
+//   warrow|<couleur>                 flèche de vent
 //   wreck, rock, obstn, isodgr, notice, harbour, underline, boat
 // Ils sont générés sur l'événement « styleimagemissing » de MapLibre.
 import type { Map as MlMap } from 'maplibre-gl';
@@ -189,6 +190,16 @@ function barb(knots: number, colour: string) {
   });
 }
 
+// Flèche de vent pointant vers le nord (sens d'écoulement ; rotation = direction vers laquelle il souffle)
+function windArrow(colour: string) {
+  return make(24, 36, (c) => {
+    c.beginPath();
+    c.moveTo(12, 2); c.lineTo(21, 15); c.lineTo(15, 13.5); c.lineTo(15, 34); c.lineTo(9, 34); c.lineTo(9, 13.5); c.lineTo(3, 15); c.closePath();
+    c.fillStyle = colour; c.fill();
+    c.strokeStyle = 'rgba(255,255,255,0.9)'; c.lineWidth = 1.5; c.stroke();
+  });
+}
+
 export function registerSymbols(map: MlMap) {
   map.on('styleimagemissing', (e: { id: string }) => {
     const id = e.id;
@@ -200,6 +211,7 @@ export function registerSymbols(map: MlMap) {
     else if (kind === 'top') img = topmark(a, b);
     else if (kind === 'light') img = light(a);
     else if (kind === 'barb') img = barb(Number(a), b || INK);
+    else if (kind === 'warrow') img = windArrow(a || INK);
     else if (STATIC[kind]) img = STATIC[kind]();
     if (!img) return;
     map.addImage(id, img, {

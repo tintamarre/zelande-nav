@@ -75,15 +75,67 @@ export function nearestHour(fc: WindForecast, t: number): number {
   return best;
 }
 
-export function windGeoJSON(fc: WindForecast, hour: number): GeoJSON.FeatureCollection {
-  return {
-    type: 'FeatureCollection',
-    features: fc.points.map((p) => ({
-      type: 'Feature',
-      properties: { speed: p.speed[hour], dir: p.dir[hour], gust: p.gust[hour] },
-      geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
-    })),
+export interface Wind { speed: number; dir: number; gust: number }
+
+/**
+ * Vent interpolé en un point quelconque (bilinéaire sur la grille, en composantes u/v pour
+ * éviter le saut 359° → 0°). Hors grille : valeur du bord le plus proche.
+ */
+export function windAt(fc: WindForecast, hour: number, lat: number, lon: number): Wind {
+  const lats = [...new Set(fc.points.map((p) => p.lat))].sort((a, b) => a - b);
+  const lons = [...new Set(fc.points.map((p) => p.lon))].sort((a, b) => a - b);
+  const at = (i: number, j: number) => fc.points[i * lons.length + j];
+  const pos = (v: number, axis: number[]) => {
+    const f = Math.min(Math.max((v - axis[0]) / (axis[1] - axis[0]), 0), axis.length - 1);
+    const i = Math.min(Math.floor(f), axis.length - 2);
+    return [i, f - i] as const;
   };
+  const [i, fy] = pos(lat, lats);
+  const [j, fx] = pos(lon, lons);
+  let u = 0, v = 0, gust = 0;
+  for (const [di, dj, w] of [[0, 0, (1 - fy) * (1 - fx)], [0, 1, (1 - fy) * fx], [1, 0, fy * (1 - fx)], [1, 1, fy * fx]] as const) {
+    const p = at(i + di, j + dj);
+    const r = (p.dir[hour] * Math.PI) / 180;
+    u += w * p.speed[hour] * Math.sin(r);
+    v += w * p.speed[hour] * Math.cos(r);
+    gust += w * p.gust[hour];
+  }
+  return { speed: Math.hypot(u, v), dir: ((Math.atan2(u, v) * 180) / Math.PI + 360) % 360, gust };
+}
+
+/** Points de vent répartis sur l'écran (tous les `spacing` px), pour un affichage à tout zoom. */
+export function windScreenGrid(
+  fc: WindForecast, hour: number, width: number, height: number, spacing: number,
+  unproject: (x: number, y: number) => { lng: number; lat: number },
+): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  for (let y = spacing / 2; y < height; y += spacing) {
+    for (let x = spacing / 2; x < width; x += spacing) {
+      const { lng, lat } = unproject(x, y);
+      const w = windAt(fc, hour, lat, lng);
+      features.push({
+        type: 'Feature',
+        properties: { speed: Math.round(w.speed), gust: Math.round(w.gust), to: (w.dir + 180) % 360 },
+        geometry: { type: 'Point', coordinates: [lng, lat] },
+      });
+    }
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+const BEAUFORT = [1, 4, 7, 11, 17, 22, 28, 34, 41, 48, 56, 64];
+export const beaufort = (kn: number) => BEAUFORT.findIndex((b) => kn < b) === -1 ? 12 : BEAUFORT.findIndex((b) => kn < b);
+
+/** Allure et amure à partir du vent (d'où il vient) et du cap fond. */
+export function pointOfSail(windFrom: number, cog: number): string {
+  const twa = (windFrom - cog + 360) % 360;
+  const a = Math.min(twa, 360 - twa);
+  const tack = twa > 180 ? 'bâbord amures' : 'tribord amures';
+  if (a < 40) return 'face au vent';
+  if (a < 70) return `près, ${tack}`;
+  if (a < 110) return `travers, ${tack}`;
+  if (a < 155) return `largue, ${tack}`;
+  return `vent arrière, ${tack}`;
 }
 
 const COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSO', 'SO', 'OSO', 'O', 'ONO', 'NO', 'NNO'];
