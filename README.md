@@ -49,7 +49,7 @@ npm run preview
 
 Le GPS du navigateur exige HTTPS (ou `localhost`). Pour tester sur un téléphone en local, passer par un tunnel HTTPS ou par le déploiement Pages.
 
-`VITE_CHART_BASE` (optionnel, au build) : URL d'un dossier contenant `zeeland.pmtiles` et `zeeland.json` si la carte est hébergée ailleurs que l'app (R2, S3… avec CORS et Range).
+`VITE_CHART_BASE` (optionnel, au build) : URL d'un dossier contenant `zeeland.pmtiles`, `zeeland.json`, `tides.json` et `currents.json` si les données sont hébergées ailleurs que l'app (R2, S3… avec CORS et Range).
 
 ## Déploiement
 

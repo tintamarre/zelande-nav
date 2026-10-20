@@ -111,8 +111,10 @@ export async function loadData<T>(name: string): Promise<T | null> {
   try {
     const res = await fetch(url, { cache: 'no-store' });
     if (!res.ok) throw new Error(String(res.status));
-    await (await caches.open(DATA_CACHE)).put(url, res.clone());
-    return (await res.json()) as T;
+    // Vérifier que c'est bien du JSON avant d'écraser la copie hors-ligne (portail captif d'un wifi de port…)
+    const data = (await res.clone().json()) as T;
+    await (await caches.open(DATA_CACHE)).put(url, res);
+    return data;
   } catch {
     try {
       const cached = await (await caches.open(DATA_CACHE)).match(url);

@@ -9,7 +9,7 @@ import { describe, type Props } from './s57';
 import { type Settings, loadSettings, safetyContour, safetyDepth, saveSettings } from './settings';
 import { buildStyle } from './style';
 import { beaufort, compass, inForecast, loadWind, nearestHour, pointOfSail, type WindForecast, windAt, windColourFor, windScreenGrid } from './weather';
-import { CURRENT_SCALE, CURRENT_SCALE_NIGHT, type CurrentGrid, currentAt, currentScreenFeatures, nearestPoint, nextTides, type Tides } from './currents';
+import { type CurrentGrid, currentAt, currentColourFor, currentScreenFeatures, nearestPoint, nextTides, type Tides } from './currents';
 import { registerSymbols } from './symbols';
 import { type Track, type TrackPoint, deleteTrack, destination, exportGpx, listTracks, saveTrack, trackNm } from './track';
 
@@ -60,12 +60,12 @@ function applyStyle() {
 let wind: WindForecast | null = null;
 let tides: Tides | null = null;
 let currentGrid: CurrentGrid | null = null;
-let live = true;   // « maintenant » : suit l'heure courante tant que le curseur n'a pas été déplacé
-let offsetH = 0;   // décalage en heures par rapport à l'heure ronde courante
+let live = true;      // « maintenant » : suit l'heure courante tant que le curseur n'a pas été déplacé
+let fixedTime = 0;    // instant choisi au curseur (absolu : ne glisse pas au changement d'heure)
 const toasted = new Set<string>();
 const timeRange = $<HTMLInputElement>('time-range');
 const hourNow = () => Math.floor(Date.now() / 3600_000) * 3600_000;
-const viewTime = () => (live ? Date.now() : hourNow() + offsetH * 3600_000);
+const viewTime = () => (live ? Date.now() : fixedTime);
 const toastOnce = (key: string, msg: string) => { if (!toasted.has(key)) toast(msg, 6000); toasted.add(key); };
 
 async function updateLayers(force = false) {
@@ -76,18 +76,19 @@ async function updateLayers(force = false) {
   $('envpanel').hidden = !settings.windLayer && !settings.currentLayer;
   $('wind-row').hidden = !settings.windLayer;
   $('current-row').hidden = !settings.currentLayer;
-  if (settings.windLayer) {
-    wind = (await loadWind(force)) ?? wind;
-    if (!wind) toastOnce('wind', 'Prévision de vent indisponible (pas de connexion ni de prévision gardée).');
-  }
-  if (settings.currentLayer && (!tides || !currentGrid || force)) {
-    const [t, g] = await Promise.all([loadData<Tides>('tides.json'), loadData<CurrentGrid>('currents.json')]);
-    tides = t ?? tides;
-    currentGrid = g ?? currentGrid;
-    if (!tides || !currentGrid) toastOnce('current', 'Courants indisponibles : ouvrez l’app une fois avec une connexion.');
-  }
-  if (live) offsetH = 0;
-  timeRange.value = String(offsetH);
+  // Vent et courants chargés en parallèle (indépendants)
+  await Promise.all([
+    settings.windLayer && (async () => {
+      wind = (await loadWind(force)) ?? wind;
+      if (!wind) toastOnce('wind', 'Prévision de vent indisponible (pas de connexion ni de prévision gardée).');
+    })(),
+    settings.currentLayer && (!tides || !currentGrid || force) && (async () => {
+      const [t, g] = await Promise.all([loadData<Tides>('tides.json'), loadData<CurrentGrid>('currents.json')]);
+      tides = t ?? tides;
+      currentGrid = g ?? currentGrid;
+      if (!tides || !currentGrid) toastOnce('current', 'Courants indisponibles : ouvrez l’app une fois avec une connexion.');
+    })(),
+  ]);
   renderLayers();
 }
 
@@ -96,15 +97,21 @@ function renderLayers() {
   const t = viewTime();
   const cv = map.getCanvas();
   if (settings.windLayer && wind) {
-    (map.getSource('wind') as GeoJSONSource | undefined)
-      ?.setData(windScreenGrid(wind, nearestHour(wind, t), cv.clientWidth, cv.clientHeight, 85, (x, y) => map.unproject([x, y])));
+    // Hors de la période de prévision : pas de flèches (jamais celles d'une autre heure)
+    (map.getSource('wind') as GeoJSONSource | undefined)?.setData(windInRange(wind, t)
+      ? windScreenGrid(wind, nearestHour(wind, t), cv.clientWidth, cv.clientHeight, 85, (x, y) => map.unproject([x, y]))
+      : { type: 'FeatureCollection', features: [] });
   }
   if (settings.currentLayer && tides && currentGrid) {
     (map.getSource('current') as GeoJSONSource | undefined)
       ?.setData(currentScreenFeatures(currentGrid, tides, t, cv.clientWidth, cv.clientHeight, 70, (lon, lat) => map.project([lon, lat])));
   }
+  // curseur : position de l'instant affiché par rapport à l'heure ronde courante
+  timeRange.value = String(live ? 0 : Math.round((fixedTime - hourNow()) / 3600_000));
   renderPanel();
 }
+
+const windInRange = (fc: WindForecast, t: number) => t >= fc.times[0] - 1800_000 && t <= fc.times.at(-1)! + 1800_000;
 
 const fmtTime = (ms: number) => {
   const d = new Date(ms);
@@ -123,7 +130,7 @@ function renderPanel() {
 
   if (settings.windLayer) {
     const h = wind ? nearestHour(wind, t) : -1;
-    const inRange = !!wind && t >= wind.times[0] - 1800_000 && t <= wind.times.at(-1)! + 1800_000;
+    const inRange = !!wind && windInRange(wind, t);
     const w = wind && inRange && inForecast(wind, here.lat, here.lon) ? windAt(wind, h, here.lat, here.lon) : null;
     if (!w) {
       $('wind-main').textContent = !wind ? 'Vent : pas de prévision' : !inRange ? 'Vent : hors période de prévision' : 'Vent : hors zone de prévision';
@@ -145,36 +152,39 @@ function renderPanel() {
   if (settings.currentLayer) {
     const p = tides && currentGrid ? nearestPoint(currentGrid, here.lat, here.lon) : null;
     const cur = p ? currentAt(p, tides!, t) : null;
-    const nt = tides ? nextTides(tides, here.lat, here.lon, t) : null;
+    const nt = p && tides ? nextTides(tides, here.lat, here.lon, t) : null;
     $('current-main').textContent = !tides || !currentGrid ? 'Courant : données indisponibles'
       : cur ? `Courant ${cur.speed.toFixed(1).replace('.', ',')} kn vers ${String(Math.round(cur.dir)).padStart(3, '0')}° · ${cur.flood ? 'flot' : 'jusant'}`
       : p ? 'Courant : hors période des marées' : 'Courant : pas d’estimation ici (eaux sans marée ou estran)';
     const parts = [
       cur ? `étale vers ${fmtTime(cur.nextSlack)}` : '',
-      nt?.hw && nt.lw ? `PM ${fmtTime(nt.hw[0])} (${fmt(nt.hw[1])} m), BM ${fmtTime(nt.lw[0])} (${fmt(nt.lw[1])} m) à ${nt.station}` : '',
+      // hauteurs en m NAP (≠ zéro des cartes, environ 2 à 2,5 m plus bas) : précisé pour ne pas les additionner aux sondes
+      nt?.hw && nt.lw ? `PM ${fmtTime(nt.hw[0])} (${fmt(nt.hw[1])} m NAP), BM ${fmtTime(nt.lw[0])} (${fmt(nt.lw[1])} m NAP) à ${nt.station}` : '',
       cur ? `${where}, estimation indicative` : '',
     ].filter(Boolean);
     $('current-sub').textContent = parts.join(' · ');
     $('current-dial').style.visibility = cur ? 'visible' : 'hidden';
     if (cur) {
       $('current-needle').style.transform = `rotate(${cur.dir}deg)`;
-      const scale = settings.night ? CURRENT_SCALE_NIGHT : CURRENT_SCALE;
-      $('current-row').style.setProperty('--needle', scale.reduce((col, [min, c2]) => (cur.speed >= min ? c2 : col), scale[0][1]));
+      $('current-row').style.setProperty('--needle', currentColourFor(cur.speed, settings.night));
     }
   }
 
   const d = new Date(t);
   const label = `${d.toLocaleDateString('fr-BE', { weekday: 'short', day: '2-digit', month: '2-digit' })} ${d.toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' })}`;
-  const srcs = [settings.windLayer ? 'vent KNMI' : '', settings.currentLayer ? 'marée RWS' : ''].filter(Boolean).join(', ');
+  const age = wind ? Math.round((Date.now() - wind.fetched) / 3600_000) : 0;
+  const srcs = [settings.windLayer ? `vent KNMI${age >= 1 ? ` d’il y a ${age} h` : ''}` : '', settings.currentLayer ? 'marée RWS, courant estimé' : ''].filter(Boolean).join(', ');
   $('time-label').textContent = `${label}${live ? ' (maintenant)' : ''} · ${srcs}`;
 }
 
 timeRange.addEventListener('input', () => {
-  offsetH = Number(timeRange.value);
+  const offsetH = Number(timeRange.value);
   live = offsetH === 0;
+  fixedTime = hourNow() + offsetH * 3600_000;
   renderLayers();
 });
-$('time-now').onclick = () => { live = true; offsetH = 0; timeRange.value = '0'; renderLayers(); };
+// « Maintenant » : revenir à l'heure courante et recharger une prévision trop ancienne
+$('time-now').onclick = () => { live = true; updateLayers(); };
 
 function toggleLayer(key: 'windLayer' | 'currentLayer', layer: string) {
   settings = { ...settings, [key]: !settings[key] };
@@ -267,7 +277,7 @@ let wakeLock: WakeLockSentinel | null = null;
 
 const boat = new Boat(onFix, (msg) => {
   toast(msg);
-  if (!boat.active) { following = false; keepAwake(!!recording); } // permission refusée : GPS arrêté
+  if (!boat.active) { following = false; zoomOnFirstFix = false; keepAwake(!!recording); } // permission refusée : GPS arrêté
   setLocateUi();
 });
 let zoomOnFirstFix = false;
@@ -287,7 +297,7 @@ function onFix(f: Fix) {
   if (zoomOnFirstFix) {
     // Première position : centrer et zoomer au niveau par défaut (balisage, sondes, alarme active)
     zoomOnFirstFix = false;
-    map.jumpTo({ center: [f.lon, f.lat], zoom: DEFAULT_FIX_ZOOM });
+    map.jumpTo({ center: [f.lon, f.lat], zoom: Math.max(map.getZoom(), DEFAULT_FIX_ZOOM) });
   }
   if (!following) renderPanel(); // en suivi, moveend s'en charge
   $('instruments').hidden = false;
@@ -469,6 +479,7 @@ locateBtn.addEventListener('pointerdown', () => {
   pressTimer = window.setTimeout(() => {
     boat.stop();
     following = false;
+    zoomOnFirstFix = false;
     keepAwake(!!recording);
     $('instruments').hidden = true;
     setAlarm(null);
@@ -481,7 +492,10 @@ locateBtn.addEventListener('pointerdown', () => {
   }, 800);
 });
 for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) locateBtn.addEventListener(ev, () => clearTimeout(pressTimer));
-map.on('dragstart', () => { if (following) { following = false; setLocateUi(); } });
+map.on('dragstart', () => {
+  zoomOnFirstFix = false; // l'utilisateur regarde ailleurs : ne pas le déplacer au premier fix
+  if (following) { following = false; setLocateUi(); }
+});
 
 async function keepAwake(on: boolean) {
   try {

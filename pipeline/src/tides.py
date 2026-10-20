@@ -93,6 +93,9 @@ def main():
         except Exception as e:  # une station en panne ne bloque pas les autres
             print(f"  ! {code}: {e}", file=sys.stderr)
             continue
+        if len(ev) < 8 or not mean_range(ev):  # série trop courte : station ignorée plutôt que fausse
+            print(f"  ! {code}: seulement {len(ev)} extrêmes", file=sys.stderr)
+            continue
         out["stations"][code] = {"name": name, "lat": lat, "lon": lon, "mean_range": mean_range(ev), "events": ev}
         print(f"{name:22} {len(ev):3} extrêmes, marnage moyen {mean_range(ev)} m")
     if len(out["stations"]) < 2:

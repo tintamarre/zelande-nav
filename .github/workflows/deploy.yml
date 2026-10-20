@@ -70,9 +70,16 @@ jobs:
       # Marée astronomique officielle (30 jours) : recalculée à chaque exécution, donc chaque jour
       - name: Marées
         working-directory: pipeline
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p ../public/tiles
-          uv run python -I src/tides.py -o ../public/tiles/tides.json --days 30
+          if ! uv run python -I src/tides.py -o ../public/tiles/tides.json --days 30; then
+            # Panne ponctuelle de l'API Rijkswaterstaat : reprendre la version publiée (30 jours d'avance)
+            echo "::warning::marées Rijkswaterstaat indisponibles, reprise de la version publiée"
+            url=$(gh api "repos/${{ github.repository }}/pages" --jq .html_url)
+            curl -sfL "${url%/}/tiles/tides.json" -o ../public/tiles/tides.json || echo "::warning::aucune version publiée des marées"
+          fi
 
       - name: Téléchargement, conversion et grille de courants
         if: steps.tiles.outputs.cache-hit != 'true'
@@ -80,7 +87,11 @@ jobs:
         run: |
           uv run python -I src/fetch_ienc.py --area zeeland --dest data
           uv run python -u -I -W ignore src/enc2pmtiles.py data/zeeland -o ../public/tiles/zeeland.pmtiles --meta data/zeeland.json --min-bytes 30000000
-          uv run python -u -I -W ignore src/currents.py data/zeeland --tides ../public/tiles/tides.json -o ../public/tiles/currents.json
+          if [ -f ../public/tiles/tides.json ]; then
+            uv run python -u -I -W ignore src/currents.py data/zeeland --tides ../public/tiles/tides.json -o ../public/tiles/currents.json
+          else
+            echo "::warning::pas de marées : grille de courants non régénérée"
+          fi
 
       - uses: actions/setup-node@v4
         with:
