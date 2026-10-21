@@ -82,7 +82,14 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 .env-time button { font: inherit; font-size: 16px; min-height: 48px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);
   background: transparent; color: var(--fg); touch-action: manipulation; user-select: none; -webkit-touch-callout: none; -webkit-user-select: none; cursor: pointer; }
 #time-now { font-size: 13px; }
-#time-label { color: var(--muted); font-variant-numeric: tabular-nums; }
+/* Heure affichée : lisible d'un coup d'œil (plein soleil, embruns) ; en couleur quand ce n'est pas « maintenant » */
+#time-main { display: flex; align-items: baseline; gap: 8px; margin-top: 4px; font-size: 20px; font-weight: 700;
+  font-variant-numeric: tabular-nums; color: var(--fg); }
+#time-main small { font-size: 14px; font-weight: 600; color: var(--muted); }
+#time-main.future { color: var(--accent); }
+#time-main.future small { color: var(--accent); }
+:root[data-theme='night'] #time-main.future, :root[data-theme='night'] #time-main.future small { color: var(--fg); }
+#time-label { color: var(--muted); font-size: 11px; }
 #alarm { position: absolute; left: 50%; transform: translateX(-50%); top: calc(var(--safe-top) + 120px); z-index: 5;
   display: flex; gap: 12px; align-items: center; background: var(--danger); color: #fff; padding: 10px 14px;
   border-radius: 10px; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.3); max-width: calc(100% - 32px); animation: pulse 1s infinite alternate; }

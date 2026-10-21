@@ -171,10 +171,17 @@ function renderPanel() {
   }
 
   const d = new Date(t);
-  const label = `${d.toLocaleDateString('fr-BE', { weekday: 'short', day: '2-digit', month: '2-digit' })} ${d.toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' })}`;
   const age = wind ? Math.round((Date.now() - wind.fetched) / 3600_000) : 0;
   const srcs = [settings.windLayer ? `vent KNMI${age >= 1 ? ` d’il y a ${age} h` : ''}` : '', settings.currentLayer ? 'marée RWS, courant estimé' : ''].filter(Boolean).join(', ');
-  $('time-label').textContent = `${label}${live ? ' (maintenant)' : ''} · ${srcs}`;
+  const hm = d.toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' });
+  const day = d.toLocaleDateString('fr-BE', { weekday: 'short', day: '2-digit', month: '2-digit' });
+  const offH = live ? 0 : Math.round((t - Date.now()) / 3600_000);
+  const tm = $('time-main');
+  tm.classList.toggle('future', !live);
+  const sub = document.createElement('small');
+  sub.textContent = `${day} · ${live ? 'maintenant' : `${offH > 0 ? '+' : offH < 0 ? '−' : ''}${Math.abs(offH)} h`}`;
+  tm.replaceChildren(hm, sub);
+  $('time-label').textContent = srcs;
 }
 
 function setOffset(offsetH: number) {
