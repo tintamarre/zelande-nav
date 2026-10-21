@@ -35,12 +35,25 @@ jobs:
           test -n "$date"
           echo "date=$date" >> "$GITHUB_OUTPUT"
 
+      # Restauration et sauvegarde séparées : une carte reprise du site publié (panne Rijkswaterstaat)
+      # ne doit jamais être mise en cache sous la clé d'une carte régénérée.
       - name: Carte en cache pour cette édition
         id: tiles
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: public/tiles
           key: tiles-${{ steps.edition.outputs.date }}-${{ hashFiles('pipeline/src/*.py', 'pipeline/uv.lock') }}
+
+      # Cellules IENC brutes de l'édition : une modification des scripts ne force pas un nouveau téléchargement
+      - name: Cellules IENC en cache
+        id: ienc
+        if: steps.tiles.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            pipeline/data/zeeland
+            pipeline/data/zeeland.json
+          key: ienc-${{ steps.edition.outputs.date }}
 
       # Version fixée, compilée depuis les sources : le paquet Ubuntu 24.04 (2.49) produit
       # des tuiles quasi vides avec nos options, sans signaler d'erreur.
@@ -94,11 +107,40 @@ jobs:
           path: pipeline/data/ns
           key: northsea-${{ steps.month.outputs.month }}
 
-      - name: Téléchargement, conversion et grille de courants
-        if: steps.tiles.outputs.cache-hit != 'true'
+      - name: Téléchargement des cellules IENC
+        id: fetch
+        if: steps.tiles.outputs.cache-hit != 'true' && steps.ienc.outputs.cache-hit != 'true'
+        working-directory: pipeline
+        continue-on-error: true
+        run: uv run python -I src/fetch_ienc.py --area zeeland --dest data
+
+      - name: Sauvegarde des cellules IENC
+        if: steps.fetch.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            pipeline/data/zeeland
+            pipeline/data/zeeland.json
+          key: ienc-${{ steps.edition.outputs.date }}
+
+      # Serveur Rijkswaterstaat injoignable et pas de cellules en cache : le site garde la carte publiée
+      # (l'app est quand même déployée) ; elle sera régénérée à la prochaine exécution.
+      - name: Reprise de la carte publiée
+        if: steps.fetch.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "::warning::téléchargement IENC impossible, reprise de la carte publiée"
+          url=$(gh api "repos/${{ github.repository }}/pages" --jq .html_url)
+          for f in zeeland.json zeeland.pmtiles currents.json; do
+            curl -sfL "${url%/}/tiles/$f" -o "public/tiles/$f"
+          done
+
+      - name: Conversion et grille de courants
+        id: build
+        if: steps.tiles.outputs.cache-hit != 'true' && steps.fetch.outcome != 'failure'
         working-directory: pipeline
         run: |
-          uv run python -I src/fetch_ienc.py --area zeeland --dest data
           uv run python -u -I -W ignore src/northsea.py data/zeeland --cache data/ns -o data/ns-out
           uv run python -u -I -W ignore src/enc2pmtiles.py data/zeeland -o ../public/tiles/zeeland.pmtiles --meta data/zeeland.json --extra data/ns-out --min-bytes 50000000
           if [ -f ../public/tiles/tides.json ]; then
@@ -106,6 +148,13 @@ jobs:
           else
             echo "::warning::pas de marées : grille de courants non régénérée"
           fi
+
+      - name: Sauvegarde de la carte
+        if: steps.build.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: public/tiles
+          key: tiles-${{ steps.edition.outputs.date }}-${{ hashFiles('pipeline/src/*.py', 'pipeline/uv.lock') }}
 
       - uses: actions/setup-node@v4
         with:
