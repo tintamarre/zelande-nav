@@ -177,12 +177,26 @@ function renderPanel() {
   $('time-label').textContent = `${label}${live ? ' (maintenant)' : ''} · ${srcs}`;
 }
 
-timeRange.addEventListener('input', () => {
-  const offsetH = Number(timeRange.value);
+function setOffset(offsetH: number) {
+  offsetH = Math.min(Number(timeRange.max), Math.max(Number(timeRange.min), offsetH));
   live = offsetH === 0;
   fixedTime = hourNow() + offsetH * 3600_000;
   renderLayers();
-});
+}
+timeRange.addEventListener('input', () => setOffset(Number(timeRange.value)));
+// Boutons −1 h / +1 h (le curseur seul est difficile à régler au doigt) ; appui maintenu : défilement
+for (const [id, step] of [['time-prev', -1], ['time-next', 1]] as const) {
+  const btn = $(id);
+  let timer = 0;
+  const stop = () => { clearTimeout(timer); timer = 0; };
+  const tick = (delay: number) => {
+    setOffset(Number(timeRange.value) + step);
+    timer = window.setTimeout(() => tick(Math.max(80, delay * 0.8)), delay);
+  };
+  btn.addEventListener('pointerdown', (e) => { e.preventDefault(); stop(); tick(400); });
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) btn.addEventListener(ev, stop);
+  btn.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOffset(Number(timeRange.value) + step); } });
+}
 // « Maintenant » : revenir à l'heure courante et recharger une prévision trop ancienne
 $('time-now').onclick = () => { live = true; updateLayers(); };
 
