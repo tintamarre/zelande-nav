@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import sys
+import time
 import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
@@ -67,8 +68,16 @@ def main():
                 print(f"déjà à jour ({c['date']})")
                 return
     print(f"téléchargement {c['title']} ({c['date']})")
-    with urllib.request.urlopen(c["url"], timeout=300) as r, open(zpath, "wb") as f:
-        shutil.copyfileobj(r, f)
+    for attempt in range(1, 5):  # serveur vaarweginformatie.nl parfois injoignable quelques minutes
+        try:
+            with urllib.request.urlopen(c["url"], timeout=300) as r, open(zpath, "wb") as f:
+                shutil.copyfileobj(r, f)
+            break
+        except OSError as e:
+            if attempt == 4:
+                sys.exit(f"téléchargement impossible : {e}")
+            print(f"  ! essai {attempt}/4 : {e}", file=sys.stderr)
+            time.sleep(60 * attempt)
     out = os.path.join(a.dest, a.area)
     # Le ZIP contient un dossier par semaine : vider l'ancienne édition pour ne pas doubler les cellules
     shutil.rmtree(out, ignore_errors=True)
