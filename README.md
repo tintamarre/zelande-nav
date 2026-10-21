@@ -28,13 +28,18 @@ scripts/    Utilitaires (polices, capture d'écran)
 cd pipeline
 uv sync
 uv run python -I src/fetch_ienc.py --area zeeland --dest data          # ~47 Mo, 61 cellules S-57
+uv run python -I -W ignore src/northsea.py data/zeeland \
+    --cache data/ns -o data/ns-out                                       # couche mer du Nord (~2 min)
 uv run python -I -W ignore src/enc2pmtiles.py data/zeeland \
-    -o ../public/tiles/zeeland.pmtiles --meta data/zeeland.json         # ~2 min 30, ~50 Mo
+    -o ../public/tiles/zeeland.pmtiles --meta data/zeeland.json \
+    --extra data/ns-out                                                  # ~3 min 30, ~70 Mo
 uv run python -I src/inspect_cells.py data/zeeland                      # inventaire : échelles, emprise, zéro
 uv run python -I src/tides.py -o ../public/tiles/tides.json             # marées officielles (30 jours)
 uv run python -I -W ignore src/currents.py data/zeeland \
     --tides ../public/tiles/tides.json -o ../public/tiles/currents.json # grille de courants estimés (~2 min)
 ```
+
+Sans `--extra`, la carte se limite à l'IENC Zélande (~50 Mo).
 
 `enc2pmtiles.py` écrit aussi `zeeland.json` (manifeste : taille, empreinte, date d'édition) que l'app lit pour afficher l'édition et proposer les mises à jour.
 
@@ -58,12 +63,22 @@ Le GPS du navigateur exige HTTPS (ou `localhost`). Pour tester sur un téléphon
 ## Hors-ligne
 
 - Le service worker (vite-plugin-pwa) met en cache l'app, les polices et les icônes.
-- La carte se télécharge explicitement (bouton ⬇, ~50 Mo) dans le Cache Storage ; elle est lue par tranches (`Blob.slice`) sans réseau. Une seule édition est gardée ; l'app signale quand une plus récente est publiée.
+- La carte se télécharge explicitement (bouton ⬇, ~70 Mo) dans le Cache Storage ; elle est lue par tranches (`Blob.slice`) sans réseau. Une seule édition est gardée ; l'app signale quand une plus récente est publiée.
 - Sans téléchargement, la carte est lue en ligne par requêtes Range.
+
+## Mer du Nord (couche indicative)
+
+Rijkswaterstaat ne publie pas d'IENC pour la mer du Nord, et les cartes marines officielles NL, BE et UK ne sont pas libres. `pipeline/src/northsea.py` complète donc la carte au large (2,0–4,6 °E × 51,0–52,3 °N, de Dunkerque aux abords de Rotterdam), uniquement là où l'IENC ne dessine rien :
+
+- terre et mer : trait de côte OpenStreetMap (orienté terre à gauche), pour ne pas confondre polders et estran ;
+- profondeurs : EMODnet Bathymetry DTM (CC-BY 4.0, maille ~115 m, ≈ zéro des cartes LAT), zones et isobathes tracées sur le minimum 3 × 3 de la grille (prudence) avec toutes les isobathes possibles du contour de sécurité, sondes = la moins profonde de chaque bloc de ~460 m ;
+- balisage, feux, voyants, épaves, éoliennes, câbles, rails de trafic : OpenStreetMap (ODbL), tags `seamark` traduits en classes et codes S-57, en mer seulement.
+
+Les objets sont fusionnés dans le même PMTiles (couches `enc` et `soundg`, propriété `src: "ns"`) : style, popup (qui affiche la source), alarme hauts-fonds et hors-ligne fonctionnent sans code spécifique. Eaux intérieures hors Zélande (port de Rotterdam, Haringvliet) non couvertes. Les téléchargements bruts sont gardés dans `data/ns` (cache mensuel en CI).
 
 ## Couches optionnelles
 
-- **Vent** (bouton vent de la barre d'outils) : prévision KNMI HARMONIE via Open-Meteo (CC-BY 4.0), grille de 0,1° sur la Zélande, interpolée pour afficher des flèches à tout zoom ; bandeau avec force, rafales, Beaufort, tendance sur 3 h et allure/amure d'après le cap fond. La dernière prévision est gardée sur l'appareil (consultation hors-ligne). Pas de flèche hors de la grille de prévision.
+- **Vent** (bouton vent de la barre d'outils) : prévision KNMI HARMONIE via Open-Meteo (CC-BY 4.0), grille de 0,15° sur la Zélande et la mer du Nord voisine, interpolée pour afficher des flèches à tout zoom ; bandeau avec force, rafales, Beaufort, tendance sur 3 h et allure/amure d'après le cap fond. La dernière prévision est gardée sur l'appareil (consultation hors-ligne). Pas de flèche hors de la grille de prévision.
 - **Courants de marée** (bouton vagues) : **estimation indicative** façon atlas de courants, pas un modèle hydrodynamique.
   - `pipeline/src/tides.py` : marée astronomique officielle Rijkswaterstaat (Waterwebservices DDL 2.0, `WATHTE` / `astronomisch`) de 8 stations (Westkapelle, Vlissingen, Terneuzen, Hansweert, Roompot, Stavenisse, Yerseke, Krammer) sur 30 jours → pleines/basses mers et marnage moyen (`tides.json`, recalculé chaque jour par la CI).
   - `pipeline/src/currents.py` : grille d'environ 900 m sur les eaux reliées à la mer sans ouvrage (sas, portes, barrages retirés : Veerse Meer, Grevelingen, Volkerak-Zoommeer et canaux exclus), direction du flot le long de l'axe des voies navigables orientée vers l'amont de l'onde de marée, vitesse maximale par bassin modulée par la profondeur, réduite hors chenal et dans les ports (`currents.json`).

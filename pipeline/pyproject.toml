@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Téléchargement des Inland ENC Rijkswaterstaat (Zélande) et conversion en PMTiles"
 requires-python = ">=3.13"
 dependencies = [
+    "contourpy>=1.4.0",
     "geopandas>=1.2.0",
     "pyogrio>=0.13.0",
+    "rasterio>=1.5.2",
     "shapely>=2.2.0",
 ]

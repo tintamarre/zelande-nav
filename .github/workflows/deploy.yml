@@ -1,4 +1,4 @@
-# Régénère la carte (et la grille de courants) quand Rijkswaterstaat publie une nouvelle édition IENC,
+# Régénère la carte (IENC Zélande + couche indicative mer du Nord, et la grille de courants) quand Rijkswaterstaat publie une nouvelle édition IENC,
 # recalcule les marées, puis déploie l'app + les données sur GitHub Pages. Tourne chaque jour (l'édition est hebdomadaire) et à chaque push.
 name: deploy
 
@@ -81,12 +81,26 @@ jobs:
             curl -sfL "${url%/}/tiles/tides.json" -o ../public/tiles/tides.json || echo "::warning::aucune version publiée des marées"
           fi
 
+      # Sources mer du Nord (EMODnet, OpenStreetMap) : retéléchargées une fois par mois, pas à chaque édition
+      - name: Mois courant
+        id: month
+        if: steps.tiles.outputs.cache-hit != 'true'
+        run: echo "month=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+
+      - name: Sources mer du Nord en cache
+        if: steps.tiles.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
+        with:
+          path: pipeline/data/ns
+          key: northsea-${{ steps.month.outputs.month }}
+
       - name: Téléchargement, conversion et grille de courants
         if: steps.tiles.outputs.cache-hit != 'true'
         working-directory: pipeline
         run: |
           uv run python -I src/fetch_ienc.py --area zeeland --dest data
-          uv run python -u -I -W ignore src/enc2pmtiles.py data/zeeland -o ../public/tiles/zeeland.pmtiles --meta data/zeeland.json --min-bytes 30000000
+          uv run python -u -I -W ignore src/northsea.py data/zeeland --cache data/ns -o data/ns-out
+          uv run python -u -I -W ignore src/enc2pmtiles.py data/zeeland -o ../public/tiles/zeeland.pmtiles --meta data/zeeland.json --extra data/ns-out --min-bytes 50000000
           if [ -f ../public/tiles/tides.json ]; then
             uv run python -u -I -W ignore src/currents.py data/zeeland --tides ../public/tiles/tides.json -o ../public/tiles/currents.json
           else

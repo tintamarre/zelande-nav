@@ -23,7 +23,7 @@ export const CLASS_NAMES: Record<string, string> = {
   RTPBCN: 'Balise radar', RADRFL: 'Réflecteur radar', WRECKS: 'Épave', OBSTRN: 'Obstruction',
   UWTROC: 'Roche', PILPNT: 'Pieu', HRBFAC: 'Installation portuaire', hrbfac: 'Installation portuaire',
   SMCFAC: 'Installation de plaisance', BERTHS: 'Poste à quai', berths: 'Poste à quai', MORFAC: 'Ouvrage d’amarrage',
-  OFSPLF: 'Plateforme', hrbare: 'Port', hrbbsn: 'Bassin', termnl: 'Terminal', bunsta: 'Avitaillement',
+  OFSPLF: 'Plateforme / éolienne', hrbare: 'Port', hrbbsn: 'Bassin', termnl: 'Terminal', bunsta: 'Avitaillement',
   CGUSTA: 'Garde-côtes', RSCSTA: 'Station de sauvetage', PILBOP: 'Pilotes', wtwaxs: 'Axe de voie navigable',
   wtwprf: 'Profil de voie navigable', notmrk: 'Panneau de signalisation', comare: 'Zone de communication',
   trnbsn: 'Bassin d’évitage', rdocal: 'Point d’appel VHF', RDOCAL: 'Point d’appel VHF', lokare: 'Zone d’écluse',
@@ -116,6 +116,9 @@ export function describe(p: Props): { title: string; rows: [string, string][] } 
     ['Saison', p.PERSTA || p.PEREND ? `${fmtPeriod(p.PERSTA)} → ${fmtPeriod(p.PEREND)}` : undefined],
     ['Info', (p.INFORM ?? undefined) as string | undefined],
     ['Info (NL)', (p.NINFOM ?? undefined) as string | undefined],
+    // Mer du Nord : hors carte officielle (EMODnet pour les profondeurs, OpenStreetMap pour le reste)
+    ['Source', p.src === 'ns' ? (['DEPARE', 'DEPCNT', 'LNDARE', 'SOUNDG'].includes(objl)
+      ? 'EMODnet (maille ~115 m, indicatif)' : 'OpenStreetMap (indicatif)') : undefined],
   ];
   return { title, rows: rows.filter((r): r is [string, string] => r[1] != null && r[1] !== '') };
 }

@@ -101,6 +101,13 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
       filter: objl('RESARE', 'resare', 'ACHARE', 'achare', 'CTNARE', 'PRCARE', 'MARCUL', 'CBLARE', 'PIPARE', 'DMPGRD', 'MIPARE'),
       minzoom: 11,
       paint: { 'line-color': P.magenta, 'line-width': 1, 'line-dasharray': [4, 3], 'line-opacity': 0.7 } },
+    // Dispositifs de séparation du trafic (mer du Nord) : zone de séparation teintée, limites magenta
+    { id: 'tsezne', type: 'fill', source: 'enc', 'source-layer': 'enc', filter: objl('TSEZNE'),
+      paint: { 'fill-color': P.magenta, 'fill-opacity': 0.12 } },
+    { id: 'tssbnd', type: 'line', source: 'enc', 'source-layer': 'enc', filter: objl('TSSBND', 'TSEZNE'),
+      paint: { 'line-color': P.magenta, 'line-width': 1.4, 'line-opacity': 0.7 } },
+    { id: 'tsslpt', type: 'line', source: 'enc', 'source-layer': 'enc', filter: objl('TSSLPT'),
+      paint: { 'line-color': P.magenta, 'line-width': 0.6, 'line-opacity': 0.7, 'line-dasharray': [4, 3] } },
     { id: 'fairwy', type: 'line', source: 'enc', 'source-layer': 'enc', filter: objl('FAIRWY'), minzoom: 10,
       paint: { 'line-color': '#7a5fa8', 'line-width': 0.8, 'line-dasharray': [6, 4], 'line-opacity': 0.6 } },
     // --- isobathes ---
@@ -122,6 +129,9 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
       paint: { 'line-color': P.coast, 'line-width': 1, 'line-dasharray': [6, 3] } },
     { id: 'cblsub', type: 'line', source: 'enc', 'source-layer': 'enc', filter: ['all', objl('CBLSUB', 'PIPSOL'), minzoomOk],
       paint: { 'line-color': P.magenta, 'line-width': 0.8, 'line-dasharray': [1, 2], 'line-opacity': 0.6 } },
+    { id: 'ofsplf', type: 'circle', source: 'enc', 'source-layer': 'enc', filter: objl('OFSPLF'), minzoom: 9,
+      paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 14, 4], 'circle-color': P.coast,
+        'circle-stroke-color': P.magenta, 'circle-stroke-width': 1 } },
     { id: 'pylons', type: 'circle', source: 'enc', 'source-layer': 'enc', filter: objl('PYLONS', 'PILPNT'), minzoom: 13,
       paint: { 'circle-radius': 1.8, 'circle-color': P.coast } },
     // --- sondes ---
@@ -243,7 +253,7 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
     version: 8,
     glyphs: `${glyphsBase}{fontstack}/{range}.pbf`,
     sources: {
-      enc: { type: 'vector', url: sourceUrl, attribution: 'Rijkswaterstaat (CC-0)' },
+      enc: { type: 'vector', url: sourceUrl, attribution: 'Rijkswaterstaat (CC-0) | Mer du Nord : EMODnet Bathymetry (CC-BY 4.0), © OpenStreetMap (ODbL)' },
       boat: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
       track: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
       wind: { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, attribution: 'Vent : KNMI via Open-Meteo (CC-BY 4.0)' },

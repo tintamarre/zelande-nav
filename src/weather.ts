@@ -1,4 +1,4 @@
-// Prévisions de vent (modèle KNMI HARMONIE via Open-Meteo, CC-BY 4.0) sur une grille couvrant la Zélande.
+// Prévisions de vent (modèle KNMI HARMONIE via Open-Meteo, CC-BY 4.0) sur une grille couvrant la Zélande et la mer du Nord voisine.
 // La dernière prévision est gardée sur l'appareil pour rester consultable hors-ligne.
 
 export interface WindForecast {
@@ -10,10 +10,11 @@ export interface WindForecast {
 const KEY = 'zn.wind';
 const MAX_AGE_MS = 3 * 3600_000; // au-delà : on tente de rafraîchir
 
-// Grille 0,1° × 0,1° couvrant l'emprise de la carte (51,2–51,9 °N × 3,15–4,55 °E : 8 × 15 = 120 points)
+// Grille 0,15° couvrant l'emprise de la carte, mer du Nord comprise (51,0–52,2 °N × 2,0–4,55 °E : 9 × 18 = 162 points)
+const ROWS = 9, COLS = 18;
 function grid(): { lat: number; lon: number }[] {
   const pts = [];
-  for (let i = 0; i < 8; i++) for (let j = 0; j < 15; j++) pts.push({ lat: +(51.2 + i * 0.1).toFixed(2), lon: +(3.15 + j * 0.1).toFixed(2) });
+  for (let i = 0; i < ROWS; i++) for (let j = 0; j < COLS; j++) pts.push({ lat: +(51.0 + i * 0.15).toFixed(2), lon: +(2.0 + j * 0.15).toFixed(2) });
   return pts;
 }
 
@@ -27,7 +28,8 @@ export function cachedWind(): WindForecast | null {
 
 export async function loadWind(force = false): Promise<WindForecast | null> {
   const cached = cachedWind();
-  if (!force && cached && Date.now() - cached.fetched < MAX_AGE_MS) return cached;
+  // prévision gardée d'une ancienne grille (plus petite) : refaite dès que possible
+  if (!force && cached && cached.points.length === ROWS * COLS && Date.now() - cached.fetched < MAX_AGE_MS) return cached;
   const pts = grid();
   const url = new URL('https://api.open-meteo.com/v1/forecast');
   url.search = new URLSearchParams({

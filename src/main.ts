@@ -33,7 +33,7 @@ const map = new maplibregl.Map({
   style: { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#cfd3d6' } }] },
   bounds: ZEELAND,
   fitBoundsOptions: { padding: 20 },
-  maxBounds: [[1.5, 50.6], [6, 52.5]],
+  maxBounds: [[1.0, 50.5], [6, 52.8]], // Zélande et mer du Nord voisine
   minZoom: 7,
   maxZoom: 19,
   attributionControl: { compact: true },
@@ -252,7 +252,7 @@ function updateEditionUi() {
 
 // ---------- identification au tap ----------
 const QUERY_LAYERS = ['buoys', 'beacons', 'lights', 'topmar', 'dangers', 'notmrk', 'harbour', 'bridge-line', 'bridge-fill',
-  'cblohd', 'clearance', 'areas', 'soundg', 'soundg-drying', 'depare'];
+  'cblohd', 'clearance', 'ofsplf', 'areas', 'tsezne', 'soundg', 'soundg-drying', 'depare'];
 
 map.on('click', (e) => {
   const r = 12;

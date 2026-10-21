@@ -189,6 +189,10 @@ def write_geojsonseq(gdf, path, layer, maxzoom):
             }, separators=(",", ":")) + "\n")
 
 
+def union_bounds(a, b):
+    return a if b is None else [min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("inputs", nargs="+")
@@ -199,6 +203,7 @@ def main():
     ap.add_argument("--min-bytes", type=int, default=0,
                     help="échoue si le PMTiles est plus petit (garde-fou contre une génération tronquée)")
     ap.add_argument("--keep-geojson", help="dossier où garder les GeoJSONSeq intermédiaires")
+    ap.add_argument("--extra", help="couche mer du Nord produite par northsea.py (dossier)")
     args = ap.parse_args()
 
     if not shutil.which("tippecanoe"):
@@ -222,6 +227,17 @@ def main():
 
     is_snd = gdf["objl"] == "SOUNDG"
     snd = gdf[is_snd].reset_index(drop=True)[["depth", "geometry"]].copy()
+    extra_meta = {}
+    if args.extra:
+        # Sondes EMODnet élaguées avec celles de l'IENC (même règle : la moins profonde par maille)
+        with open(os.path.join(args.extra, "soundg.json")) as f:
+            ns = json.load(f)
+        ns = gpd.GeoDataFrame({"depth": [d for _, _, d in ns], "src": "ns"},
+                              geometry=gpd.points_from_xy([x for x, _, _ in ns], [y for _, y, _ in ns]), crs="EPSG:4326")
+        snd = gpd.GeoDataFrame(pd.concat([snd, ns], ignore_index=True), crs="EPSG:4326")
+        with open(os.path.join(args.extra, "meta.json")) as f:
+            extra_meta = json.load(f)
+        print(f"mer du Nord : {len(ns)} sondes")
     snd["minz"] = thin_soundings(snd, zmin=CLASS_MINZOOM["SOUNDG"], zmax=args.maxzoom)
     enc = gdf[~is_snd].reset_index(drop=True).drop(columns=["depth"], errors="ignore")
     scamin = enc["SCAMIN"] if "SCAMIN" in enc else pd.Series([None] * len(enc))
@@ -241,6 +257,7 @@ def main():
         f_enc, f_snd = os.path.join(tmp, "enc.geojsonl"), os.path.join(tmp, "soundg.geojsonl")
         write_geojsonseq(enc, f_enc, "enc", args.maxzoom)
         write_geojsonseq(snd, f_snd, "soundg", args.maxzoom)
+        extra = [os.path.join(args.extra, "enc.geojsonl")] if args.extra else []
         cmd = [
             "tippecanoe", "-q", "-o", args.output, "--force",
             "-Z", str(args.minzoom), "-z", str(args.maxzoom),
@@ -251,7 +268,7 @@ def main():
             "--simplification=8",           # ≈ 1 px aux petits zooms
             "--simplification-at-maximum-zoom=4",  # ≈ 1,2 m au zoom 15
             "--name", "ENC Zeeland", "--attribution", "Rijkswaterstaat (CC-0)",
-            f_enc, f_snd,
+            f_enc, f_snd, *extra,
         ]
         subprocess.run(cmd, check=True)
 
@@ -272,7 +289,8 @@ def main():
         "edition_date": edition.get("date"),
         "edition_title": edition.get("title"),
         "cells": len(cells),
-        "bounds": [round(float(v), 4) for v in gdf.total_bounds],
+        "bounds": [round(float(v), 4) for v in union_bounds(gdf.total_bounds, extra_meta.get("bounds"))],
+        "extra": extra_meta.get("sources"),
         "minzoom": args.minzoom,
         "maxzoom": args.maxzoom,
     }
