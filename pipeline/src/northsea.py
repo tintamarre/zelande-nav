@@ -2,7 +2,7 @@
 """Mer du Nord (hors emprise IENC) : profondeurs EMODnet et balisage OpenStreetMap → GeoJSONSeq pour tippecanoe.
 
 Usage:
-    uv run python -I src/northsea.py data/zeeland --cache data/ns -o data/ns/out
+    uv run python -I src/northsea.py data/zeeland --cache data/ns -o data/ns-out
 
 Rijkswaterstaat ne publie pas d'IENC pour la mer du Nord, et les cartes marines officielles (NL, BE, UK)
 ne sont pas libres. Cette couche INDICATIVE complète la carte au large, là où l'IENC ne dessine rien :
@@ -12,7 +12,8 @@ ne sont pas libres. Cette couche INDICATIVE complète la carte au large, là où
   (un haut-fond est un peu élargi, jamais lissé), et chaque sonde est la moins profonde de son bloc.
 - Balisage, feux, épaves, dispositifs de séparation du trafic… : OpenStreetMap (ODbL), tags « seamark »
   (OpenSeaMap) traduits dans les classes et codes S-57 que l'app sait déjà dessiner.
-Sortie : enc.geojsonl et soundg.geojsonl (mêmes couches que l'IENC, propriété src="ns") + meta.json.
+Sortie : enc.geojsonl (couche enc de l'IENC, propriété src="ns"), soundg.json (sondes [lon, lat, profondeur],
+élaguées avec celles de l'IENC par enc2pmtiles --extra) + meta.json.
 """
 import argparse
 import glob
@@ -82,8 +83,12 @@ def fetch_sources(cache):
         for url in OVERPASS:
             try:
                 download(url, path, data, tries=2)
-                if json.load(open(path))["elements"]:
+                with open(path) as f:
+                    resp = json.load(f)
+                # « remark » : délai ou mémoire dépassés côté Overpass, résultat tronqué (à ne pas garder un mois)
+                if resp["elements"] and not resp.get("remark"):
                     break
+                print(f"  ! {url[:40]}… : réponse {'tronquée' if resp.get('remark') else 'vide'}", file=sys.stderr)
             except (SystemExit, ValueError, KeyError):
                 pass
             if os.path.exists(path):
@@ -176,7 +181,7 @@ def iter_lines(g):
     return []
 
 
-def bathymetry(dtm_path, outside, prep_cov):
+def bathymetry(dtm_path, outside):
     with rasterio.open(dtm_path) as r:
         elev = r.read(1).astype("float64")
         t = r.transform
@@ -336,7 +341,7 @@ def seamark_features(osm_path, outside, prep_sea):
             p["WATLEV"] = WATLEV.get(g("water_level") or "")
         if objl in ("RESARE", "ACHARE"):
             p["INFORM"] = g("restriction") or g("category")
-        feats.append(("enc", p, geom, 9 if objl.startswith(("BOY", "BCN", "LIGHTS", "WRECKS", "OBSTRN")) else 8))
+        n_lights = 0
         # Voyant et feu portés par la marque (objets séparés en S-57)
         if e["type"] == "node":
             top = tags.get("seamark:topmark:shape")
@@ -356,6 +361,10 @@ def seamark_features(osm_path, outside, prep_sea):
                 if name:
                     lt["OBJNAM"] = name
                 feats.append(("enc", lt, geom, 9))
+                n_lights += 1
+        # Feu seul (light_minor…) déjà décrit par ses tags seamark:light:* : pas d'objet LIGHTS vide en double
+        if not (objl == "LIGHTS" and n_lights):
+            feats.append(("enc", p, geom, 9 if objl.startswith(("BOY", "BCN", "LIGHTS", "WRECKS", "OBSTRN")) else 8))
     print(f"balisage OSM : {len(feats)} objets hors emprise IENC")
     return feats
 
@@ -385,11 +394,10 @@ def main():
     cov = ienc_coverage(a.cells_dir)
     sea, coast = sea_area(coast_path)
     outside = shapely.box(*BBOX).difference(cov)
-    prep_cov = shapely.prepared.prep(cov)
     outside_sea = outside.intersection(sea)
     shapely.prepare(outside)
     shapely.prepare(outside_sea)
-    feats, sound = bathymetry(dtm, outside_sea, prep_cov)
+    feats, sound = bathymetry(dtm, outside_sea)
     # Terre (côté terre du trait de côte) et trait de côte, hors emprise IENC
     for q in iter_polys(outside.difference(sea).simplify(0.0002)):
         if q.area > 1e-8:

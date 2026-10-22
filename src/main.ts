@@ -175,7 +175,7 @@ function renderPanel() {
   const srcs = [settings.windLayer ? `vent KNMI${age >= 1 ? ` d’il y a ${age} h` : ''}` : '', settings.currentLayer ? 'marée RWS, courant estimé' : ''].filter(Boolean).join(', ');
   const hm = d.toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' });
   const day = d.toLocaleDateString('fr-BE', { weekday: 'short', day: '2-digit', month: '2-digit' });
-  const offH = live ? 0 : Math.round((t - Date.now()) / 3600_000);
+  const offH = live ? 0 : Math.round((fixedTime - hourNow()) / 3600_000); // même référence que le curseur
   const tm = $('time-main');
   tm.classList.toggle('future', !live);
   const sub = document.createElement('small');
@@ -184,11 +184,15 @@ function renderPanel() {
   $('time-label').textContent = srcs;
 }
 
-function setOffset(offsetH: number) {
+/** Renvoie faux si l'heure n'a pas changé (borne du curseur atteinte). */
+function setOffset(offsetH: number): boolean {
   offsetH = Math.min(Number(timeRange.max), Math.max(Number(timeRange.min), offsetH));
+  const t = hourNow() + offsetH * 3600_000;
+  if (live === (offsetH === 0) && (live || t === fixedTime)) return false;
   live = offsetH === 0;
-  fixedTime = hourNow() + offsetH * 3600_000;
+  fixedTime = t;
   renderLayers();
+  return true;
 }
 timeRange.addEventListener('input', () => setOffset(Number(timeRange.value)));
 // Boutons −1 h / +1 h (le curseur seul est difficile à régler au doigt) ; appui maintenu : défilement
@@ -197,7 +201,7 @@ for (const [id, step] of [['time-prev', -1], ['time-next', 1]] as const) {
   let timer = 0;
   const stop = () => { clearTimeout(timer); timer = 0; };
   const tick = (delay: number) => {
-    setOffset(Number(timeRange.value) + step);
+    if (!setOffset(Number(timeRange.value) + step)) { stop(); return; } // borne atteinte : plus rien à défiler
     timer = window.setTimeout(() => tick(Math.max(80, delay * 0.8)), delay);
   };
   btn.addEventListener('pointerdown', (e) => { e.preventDefault(); stop(); tick(400); });

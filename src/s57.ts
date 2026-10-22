@@ -116,9 +116,9 @@ export function describe(p: Props): { title: string; rows: [string, string][] } 
     ['Saison', p.PERSTA || p.PEREND ? `${fmtPeriod(p.PERSTA)} → ${fmtPeriod(p.PEREND)}` : undefined],
     ['Info', (p.INFORM ?? undefined) as string | undefined],
     ['Info (NL)', (p.NINFOM ?? undefined) as string | undefined],
-    // Mer du Nord : hors carte officielle (EMODnet pour les profondeurs, OpenStreetMap pour le reste)
-    ['Source', p.src === 'ns' ? (['DEPARE', 'DEPCNT', 'LNDARE', 'SOUNDG'].includes(objl)
-      ? 'EMODnet (maille ~115 m, indicatif)' : 'OpenStreetMap (indicatif)') : undefined],
+    // Mer du Nord : hors carte officielle (EMODnet pour les profondeurs, trait de côte OSM pour la terre, OSM pour le reste)
+    ['Source', p.src === 'ns' ? (['DEPARE', 'DEPCNT', 'SOUNDG'].includes(objl) ? 'EMODnet (maille ~115 m, indicatif)'
+      : objl === 'LNDARE' ? 'OpenStreetMap / EMODnet (indicatif)' : 'OpenStreetMap (indicatif)') : undefined],
   ];
   return { title, rows: rows.filter((r): r is [string, string] => r[1] != null && r[1] !== '') };
 }
