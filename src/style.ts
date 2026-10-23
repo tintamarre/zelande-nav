@@ -157,7 +157,8 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
     // Villes : sous le balisage (qui l'emporte en cas de collision), les plus peuplées d'abord
     { id: 'places', type: 'symbol', source: 'enc', 'source-layer': 'enc', filter: ['all', objl('PLACE'), minzoomOk],
       layout: { 'text-field': ['get', 'OBJNAM'], 'text-font': ['Noto Sans Medium'],
-        'text-size': ['case', ['==', ['get', 'rank'], 1], ['interpolate', ['linear'], ['zoom'], 7, 12, 12, 15], 12],
+        // « zoom » seulement dans un interpolate de premier niveau (sinon MapLibre rejette tout le style)
+        'text-size': ['interpolate', ['linear'], ['zoom'], 7, 12, 12, ['case', ['==', ['get', 'rank'], 1], 15, 12]],
         'text-transform': ['case', ['==', ['get', 'rank'], 1], 'uppercase', 'none'], 'text-letter-spacing': 0.05,
         'text-padding': 12, 'symbol-sort-key': ['-', 0, ['coalesce', ['get', 'pop'], 0]] },
       paint: { 'text-color': P.place, 'text-halo-color': P.halo, 'text-halo-width': 1.4,
