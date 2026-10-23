@@ -1,20 +1,28 @@
 #!/usr/bin/env python3
-"""Marée astronomique officielle (Rijkswaterstaat, DDL 2.0) des stations de Zélande et de la côte néerlandaise
-de la mer du Nord → pleines et basses mers.
+"""Marée astronomique des stations de Zélande, de la côte néerlandaise et des ports voisins → pleines et basses mers.
 
 Usage:
-    uv run python -I src/tides.py -o ../public/tiles/tides.json [--days 30]
+    uv run python -I src/tides.py -o ../public/tiles/tides.json [--days 30] [--harmonics harmonics.json]
 
-Source : Waterwebservices DDL 2.0, grandeur WATHTE, ProcesType « astronomisch » (pas de 10 min, cm/NAP).
-Sortie : pour chaque station, la liste des extrêmes [t_ms, hauteur_m, "H"|"L"] et le marnage moyen
-de la période (vives-eaux et mortes-eaux comprises), utilisé pour le coefficient de marée.
+Sources :
+- Pays-Bas : prédiction officielle Rijkswaterstaat, Waterwebservices DDL 2.0, grandeur WATHTE, ProcesType
+  « astronomisch » (pas de 10 min, cm/NAP) ; hauteurs en m NAP (datum « NAP »).
+- France, Belgique, Angleterre : prédiction calculée ici à partir des constantes harmoniques de harmonics.json
+  (analyse d'un an de mesures IOC, voir harmonics.py) ; hauteurs au-dessus de la plus basse mer astronomique,
+  soit le zéro des cartes (datum « ZC »).
+Sortie : pour chaque station, la liste des extrêmes [t_ms, hauteur_m, "H"|"L"], le marnage moyen de la période
+(vives-eaux et mortes-eaux comprises, utilisé pour le coefficient de marée) et la référence des hauteurs.
 """
 import argparse
 import datetime as dt
 import json
 import math
+import os
 import sys
 import urllib.request
+
+import numpy as np
+import utide
 
 API = "https://ddapi20-waterwebservices.rijkswaterstaat.nl/ONLINEWAARNEMINGENSERVICES/OphalenWaarnemingen"
 
@@ -108,15 +116,39 @@ def mean_range(ev):
     return round(sum(r) / len(r), 2) if r else None
 
 
+def from_json(o):
+    """Coefficients utide écrits par harmonics.py (tableaux et complexes encodés) → Bunch pour utide.reconstruct."""
+    if isinstance(o, dict):
+        if "__nd__" in o:
+            if "imag" in o:
+                return (np.array(o["__nd__"]) + 1j * np.array(o["imag"])).astype(o["dtype"])
+            return np.array(o["__nd__"], dtype=o["dtype"])
+        if "__c__" in o:
+            return complex(*o["__c__"])
+        return utide.utilities.Bunch({k: from_json(v) for k, v in o.items()})
+    if isinstance(o, list):
+        return [from_json(v) for v in o]
+    return o
+
+
+def harmonic_series(st, start, end):
+    """Prédiction (pas de 10 min) d'une station de harmonics.json, en m au-dessus de la plus basse mer astronomique."""
+    t = np.arange(np.datetime64(int(start.timestamp()), "s"), np.datetime64(int(end.timestamp()), "s"), np.timedelta64(600, "s"))
+    h = utide.reconstruct(t, from_json(st["coef"]), verbose=False).h - st["lat_level"]
+    return [(float(x), float(v)) for x, v in zip(t.astype("int64"), h)]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-o", "--output", required=True)
     ap.add_argument("--days", type=int, default=30)
+    ap.add_argument("--harmonics", default="harmonics.json", help="constantes des ports hors Pays-Bas (harmonics.py)")
     a = ap.parse_args()
     tz = dt.timezone(dt.timedelta(hours=1))
     start = dt.datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0) - dt.timedelta(days=1)
     end = start + dt.timedelta(days=a.days + 1)
-    out = {"generated": round(dt.datetime.now(dt.timezone.utc).timestamp() * 1000), "source": "Rijkswaterstaat, marée astronomique (NAP)", "stations": {}}
+    out = {"generated": round(dt.datetime.now(dt.timezone.utc).timestamp() * 1000),
+           "source": "Rijkswaterstaat, marée astronomique (NAP) ; ports voisins : analyse harmonique des mesures IOC", "stations": {}}
     for code, (name, lat, lon) in STATIONS.items():
         try:
             ev = extremes(fetch(code, start, end))
@@ -126,10 +158,24 @@ def main():
         if len(ev) < 8 or not mean_range(ev):  # série trop courte : station ignorée plutôt que fausse
             print(f"  ! {code}: seulement {len(ev)} extrêmes", file=sys.stderr)
             continue
-        out["stations"][code] = {"name": name, "lat": lat, "lon": lon, "mean_range": mean_range(ev), "events": ev}
+        out["stations"][code] = {"name": name, "lat": lat, "lon": lon, "mean_range": mean_range(ev), "datum": "NAP", "events": ev}
         print(f"{name:22} {len(ev):3} extrêmes, marnage moyen {mean_range(ev)} m")
+    # Panne Rijkswaterstaat : échec, pour que la CI reprenne la version publiée (les ports voisins seuls ne suffisent pas)
     if len(out["stations"]) < 2:
         sys.exit("trop peu de stations de marée disponibles")
+    if os.path.exists(a.harmonics):
+        with open(a.harmonics) as f:
+            harm = json.load(f)["stations"]
+        for code, st in harm.items():
+            ev = extremes(harmonic_series(st, start, end))
+            if len(ev) < 8 or not mean_range(ev):
+                print(f"  ! {code}: seulement {len(ev)} extrêmes", file=sys.stderr)
+                continue
+            out["stations"][code] = {"name": st["name"], "lat": st["lat"], "lon": st["lon"], "mean_range": mean_range(ev),
+                                     "datum": "ZC", "events": ev}
+            print(f"{st['name']:22} {len(ev):3} extrêmes, marnage moyen {mean_range(ev)} m (constantes harmoniques)")
+    else:
+        print(f"  ! {a.harmonics} absent : pas de marées hors Pays-Bas", file=sys.stderr)
     with open(a.output, "w") as f:
         json.dump(out, f, separators=(",", ":"))
 

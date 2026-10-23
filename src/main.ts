@@ -185,9 +185,10 @@ function renderPanel() {
       : !tides || !currentGrid ? 'Courant : données indisponibles' : 'Courant : pas d’estimation ici (Zélande et mer du Nord seulement)';
     const parts = [
       cur ? `étale vers ${fmtTime(cur.nextSlack)}` : '',
-      // hauteurs en m NAP (≠ zéro des cartes, environ 2 à 2,5 m plus bas) : précisé pour ne pas les additionner aux sondes
-      nt?.hw && nt.lw ? `PM ${fmtTime(nt.hw[0])} (${fmt(nt.hw[1])} m NAP), BM ${fmtTime(nt.lw[0])} (${fmt(nt.lw[1])} m NAP) à ${nt.station}${nt.km >= 8 ? ` (${Math.round(nt.km)} km)` : ''}`
-        : tides && !nt ? 'marée : pas de station Rijkswaterstaat à moins de 30 km' : '',
+      // hauteurs en m NAP (≠ zéro des cartes, environ 2 à 2,5 m plus bas) ou en m ZC (zéro des cartes, ports voisins) :
+      // référence toujours précisée, pour ne pas additionner des m NAP aux sondes
+      nt?.hw && nt.lw ? `PM ${fmtTime(nt.hw[0])} (${fmt(nt.hw[1])} m ${nt.datum}), BM ${fmtTime(nt.lw[0])} (${fmt(nt.lw[1])} m ${nt.datum}) à ${nt.station}${nt.km >= 8 ? ` (${Math.round(nt.km)} km)` : ''}`
+        : tides && !nt ? 'marée : pas de station à moins de 30 km' : '',
       cur ? `${where}, estimation indicative` : '',
       sc ? `${where}, modèle Mercator (maille ~8 km, marée et vent), indicatif` : '',
     ].filter(Boolean);

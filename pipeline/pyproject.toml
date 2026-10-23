@@ -9,4 +9,5 @@ dependencies = [
     "pyogrio>=0.13.0",
     "rasterio>=1.5.2",
     "shapely>=2.2.0",
+    "utide>=0.4.0",
 ]

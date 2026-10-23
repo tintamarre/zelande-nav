@@ -7,7 +7,8 @@
 // jour rapporté au marnage moyen (vives-eaux / mortes-eaux). Les hauteurs sont en m NAP.
 
 export type TideEvent = [number, number, 'H' | 'L']; // instant (ms), hauteur (m/NAP), pleine ou basse mer
-export interface TideStation { name: string; lat: number; lon: number; mean_range: number; events: TideEvent[] }
+// datum : référence des hauteurs, « NAP » (Rijkswaterstaat) ou « ZC » (zéro des cartes : ports voisins, constantes harmoniques)
+export interface TideStation { name: string; lat: number; lon: number; mean_range: number; datum?: 'NAP' | 'ZC'; events: TideEvent[] }
 export interface Tides { generated: number; source: string; stations: Record<string, TideStation> }
 // [lat, lon, direction du flot (°), vitesse max à marée moyenne (kn), station 1, station 2, poids station 1]
 export type CurrentPoint = [number, number, number, number, string, string, number];
@@ -87,7 +88,7 @@ export function nearestPoint(grid: CurrentGrid, lat: number, lon: number, maxKm 
 
 /** Prochaines pleine et basse mers à la station la plus proche, si elle est à moins de `maxKm`
  * (au-delà, l'heure de la marée peut différer de plus d'une demi-heure : côte belge, large). */
-export function nextTides(tides: Tides, lat: number, lon: number, t: number, maxKm = 30): { station: string; km: number; hw?: TideEvent; lw?: TideEvent } | null {
+export function nextTides(tides: Tides, lat: number, lon: number, t: number, maxKm = 30): { station: string; km: number; datum: 'NAP' | 'ZC'; hw?: TideEvent; lw?: TideEvent } | null {
   const k = Math.cos((lat * Math.PI) / 180);
   const st = Object.values(tides.stations).reduce<TideStation | null>((a, s) =>
     !a || (s.lat - lat) ** 2 + ((s.lon - lon) * k) ** 2 < (a.lat - lat) ** 2 + ((a.lon - lon) * k) ** 2 ? s : a, null);
@@ -95,7 +96,7 @@ export function nextTides(tides: Tides, lat: number, lon: number, t: number, max
   const km = Math.hypot(st.lat - lat, (st.lon - lon) * k) * 111;
   if (km > maxKm) return null;
   const next = st.events.filter((e) => e[0] > t);
-  return { station: st.name, km, hw: next.find((e) => e[2] === 'H'), lw: next.find((e) => e[2] === 'L') };
+  return { station: st.name, km, datum: st.datum ?? 'NAP', hw: next.find((e) => e[2] === 'H'), lw: next.find((e) => e[2] === 'L') };
 }
 
 /** Courants répartis sur l'écran : par case de `spacing` px, le point du chenal (vitesse max la plus forte). */
