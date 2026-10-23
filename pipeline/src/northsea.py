@@ -15,7 +15,8 @@ ne sont pas libres. Cette couche INDICATIVE complète la carte au large, là où
 - Balisage, feux, épaves, dispositifs de séparation du trafic… : OpenStreetMap (ODbL), tags « seamark »
   (OpenSeaMap) traduits dans les classes et codes S-57 que l'app sait déjà dessiner.
 Sortie : enc.geojsonl (couche enc de l'IENC, propriété src="ns"), soundg.json (sondes [lon, lat, profondeur],
-élaguées avec celles de l'IENC par enc2pmtiles --extra) + meta.json.
+élaguées avec celles de l'IENC par enc2pmtiles --extra), current_points.json (mailles du modèle de courants
+lues par seacurrents.py) + meta.json.
 Ajoute aussi la limite de la carte officielle (M_COVR) et les noms des villes (PLACE, OSM, sur toute l'emprise).
 """
 import argparse
@@ -454,7 +455,21 @@ def seamark_features(osm_path, outside, prep_sea):
     return feats
 
 
-def write(feats, sound, out):
+def current_points(outside_sea):
+    """Mailles du modèle de courants SMOC (Mercator, 1/12°, centres en k/12 + 1/24) en mer du Nord, hors carte
+    officielle et à plus de ~1 km de la côte (le modèle n'y résout ni les chenaux ni les bancs).
+    seacurrents.py y lit chaque jour la prévision (Open-Meteo) ; en Zélande, l'estimation de currents.py prime."""
+    inner = outside_sea.buffer(-0.012)
+    lats = np.arange(BBOX[1] + 1 / 24, BBOX[3], 1 / 12)
+    lons = np.arange(BBOX[0] + 1 / 24, BBOX[2], 1 / 12)
+    lon, lat = np.meshgrid(lons, lats)
+    keep = shapely.contains_xy(inner, lon, lat)
+    pts = [[round(float(y), 4), round(float(x), 4)] for x, y in zip(lon[keep], lat[keep])]
+    print(f"courants mer du Nord : {len(pts)} mailles du modèle")
+    return pts
+
+
+def write(feats, sound, out, cur_points):
     os.makedirs(out, exist_ok=True)
     with open(os.path.join(out, "enc.geojsonl"), "w") as f:
         for layer, props, geom, minz in feats:
@@ -465,6 +480,8 @@ def write(feats, sound, out):
     # minzoom des sondes : même élagage que l'IENC (la moins profonde par maille), fait par enc2pmtiles
     with open(os.path.join(out, "soundg.json"), "w") as f:
         json.dump(sound, f, separators=(",", ":"))
+    with open(os.path.join(out, "current_points.json"), "w") as f:
+        json.dump(cur_points, f, separators=(",", ":"))
     with open(os.path.join(out, "meta.json"), "w") as f:
         json.dump({"bounds": list(BBOX), "sources": "EMODnet Bathymetry (CC-BY 4.0), © OpenStreetMap (ODbL)"}, f)
 
@@ -499,7 +516,7 @@ def main():
     feats += place_features(places_path)
     if len(sound) < 1000 or sum(1 for f in feats if f[1]["objl"] == "DEPARE") < 50:
         sys.exit("mer du Nord : trop peu d'objets, vérifier les téléchargements")
-    write(feats, sound, a.output)
+    write(feats, sound, a.output, current_points(outside_sea))
 
 
 if __name__ == "__main__":

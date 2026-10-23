@@ -278,7 +278,7 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
       boat: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
       track: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
       wind: { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, attribution: 'Vent : KNMI via Open-Meteo (CC-BY 4.0)' },
-      current: { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, attribution: 'Courants estimés d’après la marée Rijkswaterstaat' },
+      current: { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, attribution: 'Courants estimés d’après la marée Rijkswaterstaat ; mer du Nord : Mercator SMOC via Open-Meteo (CC-BY 4.0)' },
     },
     layers,
   };

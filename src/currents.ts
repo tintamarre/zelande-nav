@@ -124,6 +124,81 @@ export function currentScreenFeatures(
   return { type: 'FeatureCollection', features };
 }
 
+// ---------- mer du Nord : prévision du modèle SMOC (pipeline/src/seacurrents.py) ----------
+// Au large, le courant tourne environ 3 h après la pleine mer (marée qui se propage le long de la côte) :
+// le modèle d'atlas ci-dessus ne s'y applique pas. Courant total (marée + vent), maille ~8 km.
+
+export interface SeaCurrents {
+  generated: number;
+  times: number[];                    // heures (ms, UTC)
+  points: [number, number][];         // [lat, lon]
+  speed_dkn: (number | null)[][];     // dixièmes de nœud, par point puis par heure
+  dir: (number | null)[][];           // direction vers laquelle porte le courant (°)
+}
+export interface SeaCurrent { speed: number; dir: number }
+
+/** Courant du modèle au point `i` à l'instant `t` (interpolation linéaire en composantes entre deux heures). */
+export function seaCurrentAt(sc: SeaCurrents, i: number, t: number): SeaCurrent | null {
+  const ts = sc.times;
+  if (ts.length < 2 || t < ts[0] || t > ts.at(-1)!) return null; // hors période : rien plutôt qu'une autre heure
+  const step = ts[1] - ts[0];
+  const k = Math.min(Math.floor((t - ts[0]) / step), ts.length - 2);
+  const f = (t - ts[k]) / step;
+  let u = 0, v = 0;
+  for (const [h, w] of [[k, 1 - f], [k + 1, f]] as const) {
+    const s = sc.speed_dkn[i][h], d = sc.dir[i][h];
+    if (s == null || d == null) return null;
+    const r = (d * Math.PI) / 180;
+    u += (w * s * Math.sin(r)) / 10;
+    v += (w * s * Math.cos(r)) / 10;
+  }
+  return { speed: Math.hypot(u, v), dir: ((Math.atan2(u, v) * 180) / Math.PI + 360) % 360 };
+}
+
+/**
+ * Courant du modèle en un point quelconque : moyenne des mailles à moins de `maxKm` pondérée par l'inverse
+ * du carré de la distance, en composantes (les mailles sont espacées de ~8 km, la vue en navigation de 2 à 5 km).
+ */
+export function seaCurrentNear(sc: SeaCurrents, lat: number, lon: number, t: number, maxKm = 6): SeaCurrent | null {
+  const k = Math.cos((lat * Math.PI) / 180);
+  let u = 0, v = 0, wsum = 0;
+  sc.points.forEach(([plat, plon], i) => {
+    const km = Math.hypot(plat - lat, (plon - lon) * k) * 111;
+    if (km > maxKm) return;
+    const c = seaCurrentAt(sc, i, t);
+    if (!c) return;
+    const w = 1 / Math.max(km, 0.2) ** 2;
+    const r = (c.dir * Math.PI) / 180;
+    u += w * c.speed * Math.sin(r);
+    v += w * c.speed * Math.cos(r);
+    wsum += w;
+  });
+  if (wsum === 0) return null;
+  u /= wsum; v /= wsum;
+  return { speed: Math.hypot(u, v), dir: ((Math.atan2(u, v) * 180) / Math.PI + 360) % 360 };
+}
+
+/** Flèches du modèle réparties sur l'écran (tous les `spacing` px), là où `accept` reconnaît l'eau du large. */
+export function seaScreenFeatures(
+  sc: SeaCurrents, t: number, width: number, height: number, spacing: number,
+  unproject: (x: number, y: number) => { lng: number; lat: number }, accept: (x: number, y: number) => boolean,
+): GeoJSON.Feature[] {
+  const features: GeoJSON.Feature[] = [];
+  for (let y = spacing / 2; y < height; y += spacing) {
+    for (let x = spacing / 2; x < width; x += spacing) {
+      const { lng, lat } = unproject(x, y);
+      const c = seaCurrentNear(sc, lat, lng, t);
+      if (!c || !accept(x, y)) continue;
+      features.push({
+        type: 'Feature',
+        properties: { speed: Math.round(c.speed * 10) / 10, to: Math.round(c.dir), model: true },
+        geometry: { type: 'Point', coordinates: [lng, lat] },
+      });
+    }
+  }
+  return features;
+}
+
 /** Échelle de couleur du courant (nœuds), distincte de celle du vent. */
 export const CURRENT_SCALE: [number, string][] = [[0, '#8a9aa8'], [0.3, '#4fb3d9'], [1, '#1f6fd0'], [2, '#5b3fd0'], [3, '#b0179b']];
 export const CURRENT_SCALE_NIGHT: [number, string][] = [[0, '#40484f'], [0.3, '#2f5a6a'], [1, '#2a3f6a'], [2, '#3f2f6a'], [3, '#5a2a55']];

@@ -37,6 +37,9 @@ uv run python -I src/inspect_cells.py data/zeeland                      # invent
 uv run python -I src/tides.py -o ../public/tiles/tides.json             # marées officielles (30 jours)
 uv run python -I -W ignore src/currents.py data/zeeland \
     --tides ../public/tiles/tides.json -o ../public/tiles/currents.json # grille de courants estimés (~2 min)
+cp data/ns-out/current_points.json ../public/tiles/ns-current-points.json
+uv run python -I src/seacurrents.py --points ../public/tiles/ns-current-points.json \
+    -o ../public/tiles/seacurrents.json                                  # courants mer du Nord (modèle, 5 jours)
 ```
 
 Sans `--extra`, la carte se limite à l'IENC Zélande (~50 Mo).
@@ -54,7 +57,7 @@ npm run preview
 
 Le GPS du navigateur exige HTTPS (ou `localhost`). Pour tester sur un téléphone en local, passer par un tunnel HTTPS ou par le déploiement Pages.
 
-`VITE_CHART_BASE` (optionnel, au build) : URL d'un dossier contenant `zeeland.pmtiles`, `zeeland.json`, `tides.json` et `currents.json` si les données sont hébergées ailleurs que l'app (R2, S3… avec CORS et Range).
+`VITE_CHART_BASE` (optionnel, au build) : URL d'un dossier contenant `zeeland.pmtiles`, `zeeland.json`, `tides.json`, `currents.json` et `seacurrents.json` si les données sont hébergées ailleurs que l'app (R2, S3… avec CORS et Range).
 
 ## Déploiement
 
@@ -83,6 +86,7 @@ Les objets sont fusionnés dans le même PMTiles (couches `enc` et `soundg`, pro
   - `pipeline/src/tides.py` : marée astronomique officielle Rijkswaterstaat (Waterwebservices DDL 2.0, `WATHTE` / `astronomisch`) de 8 stations (Westkapelle, Vlissingen, Terneuzen, Hansweert, Roompot, Stavenisse, Yerseke, Krammer) sur 30 jours → pleines/basses mers et marnage moyen (`tides.json`, recalculé chaque jour par la CI).
   - `pipeline/src/currents.py` : grille d'environ 900 m sur les eaux reliées à la mer sans ouvrage (sas, portes, barrages retirés : Veerse Meer, Grevelingen, Volkerak-Zoommeer et canaux exclus), direction du flot le long de l'axe des voies navigables orientée vers l'amont de l'onde de marée, vitesse maximale par bassin modulée par la profondeur, réduite hors chenal et dans les ports (`currents.json`).
   - App : flot de l'étale de basse mer à l'étale de pleine mer (étale ≈ 35 min après PM/BM locale), demi-sinusoïde entre deux étales, modulée par le marnage du jour (vives-eaux / mortes-eaux) ; bandeau avec courant au bateau, prochaine étale, prochaines PM/BM. Données gardées pour le hors-ligne.
+  - Mer du Nord (hors carte officielle) : au large, la marée se propage le long de la côte et le courant tourne environ 3 h après la pleine mer, ce que le modèle d'atlas ne reproduit pas. On y affiche la **prévision du modèle Mercator SMOC** (Copernicus Marine, maille 1/12° ≈ 8 km, marée + vent + circulation), servie par l'API marine d'Open-Meteo (CC-BY 4.0) : `northsea.py` choisit les mailles en mer à plus de ~1 km de la côte (`ns-current-points.json`), `seacurrents.py` en récupère chaque jour en CI la série horaire de la veille à J+4 (`seacurrents.json`, ~170 Ko), interpolée à l'heure du curseur par l'app.
 - Vent et courant partagent le curseur horaire (−6 h à +72 h, « Maintenant » suit l'heure courante).
 
 ## Mobile

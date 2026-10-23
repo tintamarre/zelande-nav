@@ -9,7 +9,10 @@ import { describe, type Props } from './s57';
 import { type Settings, loadSettings, safetyContour, safetyDepth, saveSettings } from './settings';
 import { buildStyle } from './style';
 import { beaufort, compass, inForecast, loadWind, nearestHour, pointOfSail, type WindForecast, windAt, windColourFor, windScreenGrid } from './weather';
-import { type CurrentGrid, currentAt, currentColourFor, currentScreenFeatures, nearestPoint, nextTides, type Tides } from './currents';
+import {
+  type CurrentGrid, currentAt, currentColourFor, currentScreenFeatures, nearestPoint, nextTides,
+  type SeaCurrents, seaCurrentNear, seaScreenFeatures, type Tides,
+} from './currents';
 import { registerSymbols } from './symbols';
 import { type Track, type TrackPoint, deleteTrack, destination, exportGpx, listTracks, saveTrack, trackNm } from './track';
 
@@ -60,6 +63,7 @@ function applyStyle() {
 let wind: WindForecast | null = null;
 let tides: Tides | null = null;
 let currentGrid: CurrentGrid | null = null;
+let sea: SeaCurrents | null = null; // mer du Nord : prévision du modèle (hors Zélande)
 let live = true;      // « maintenant » : suit l'heure courante tant que le curseur n'a pas été déplacé
 let fixedTime = 0;    // instant choisi au curseur (absolu : ne glisse pas au changement d'heure)
 const toasted = new Set<string>();
@@ -82,16 +86,18 @@ async function updateLayers(force = false) {
       wind = (await loadWind(force)) ?? wind;
       if (!wind) toastOnce('wind', 'Prévision de vent indisponible (pas de connexion ni de prévision gardée).');
     })(),
-    settings.currentLayer && (!tides || !currentGrid || force) && (async () => {
-      const [t, g] = await Promise.all([loadData<Tides>('tides.json'), loadData<CurrentGrid>('currents.json')]);
+    settings.currentLayer && (!tides || !currentGrid || !sea || force) && (async () => {
+      const [t, g, sc] = await Promise.all([loadData<Tides>('tides.json'), loadData<CurrentGrid>('currents.json'), loadData<SeaCurrents>('seacurrents.json')]);
       tides = t ?? tides;
       currentGrid = g ?? currentGrid;
+      sea = sc ?? sea;
       if (!tides || !currentGrid) toastOnce('current', 'Courants indisponibles : ouvrez l’app une fois avec une connexion.');
     })(),
   ]);
   renderLayers();
 }
 
+let idleRedraw = false;
 /** Flèches recalculées pour la vue et l'heure affichées : visibles à tout zoom. */
 function renderLayers() {
   const t = viewTime();
@@ -102,9 +108,22 @@ function renderLayers() {
       ? windScreenGrid(wind, nearestHour(wind, t), cv.clientWidth, cv.clientHeight, 85, (x, y) => map.unproject([x, y]))
       : { type: 'FeatureCollection', features: [] });
   }
-  if (settings.currentLayer && tides && currentGrid) {
-    (map.getSource('current') as GeoJSONSource | undefined)
-      ?.setData(currentScreenFeatures(currentGrid, tides, t, cv.clientWidth, cv.clientHeight, 70, (lon, lat) => map.project([lon, lat])));
+  if (settings.currentLayer && ((tides && currentGrid) || sea)) {
+    const project = (lon: number, lat: number) => map.project([lon, lat]);
+    const fc: GeoJSON.FeatureCollection = tides && currentGrid
+      ? currentScreenFeatures(currentGrid, tides, t, cv.clientWidth, cv.clientHeight, 70, project)
+      : { type: 'FeatureCollection', features: [] };
+    // Mer du Nord : flèches du modèle, seulement sur l'eau de la couche indicative (ni terre, ni carte officielle
+    // où l'estimation de Zélande prime)
+    if (sea) {
+      const hasDepare = !!map.getLayer('depare');
+      const accept = (x: number, y: number) => !hasDepare || map.queryRenderedFeatures([x, y], { layers: ['depare'] })
+        .some((f) => f.properties.src === 'ns' && Number(f.properties.DRVAL1) >= 0);
+      fc.features.push(...seaScreenFeatures(sea, t, cv.clientWidth, cv.clientHeight, 70, (x, y) => map.unproject([x, y]), accept));
+      // Tuiles pas encore affichées (démarrage, déplacement) : on redessine une fois la carte stabilisée
+      if (!map.areTilesLoaded() && !idleRedraw) { idleRedraw = true; map.once('idle', () => { idleRedraw = false; renderLayers(); }); }
+    }
+    (map.getSource('current') as GeoJSONSource | undefined)?.setData(fc);
   }
   // curseur : position de l'instant affiché par rapport à l'heure ronde courante
   timeRange.value = String(live ? 0 : Math.round((fixedTime - hourNow()) / 3600_000));
@@ -154,27 +173,36 @@ function renderPanel() {
     const cur = p ? currentAt(p, tides!, t) : null;
     // Marée : à la station la plus proche, aussi là où il n'y a pas d'estimation de courant (mer du Nord)
     const nt = tides ? nextTides(tides, here.lat, here.lon, t) : null;
-    $('current-main').textContent = !tides || !currentGrid ? 'Courant : données indisponibles'
-      : cur ? `Courant ${cur.speed.toFixed(1).replace('.', ',')} kn vers ${String(Math.round(cur.dir)).padStart(3, '0')}° · ${cur.flood ? 'flot' : 'jusant'}`
-      : p ? 'Courant : hors période des marées' : 'Courant : pas d’estimation ici (estimé en Zélande seulement)';
+    // Mer du Nord : prévision du modèle là où il n'y a pas d'estimation de Zélande
+    const sc = !p && sea ? seaCurrentNear(sea, here.lat, here.lon, t) : null;
+    const seaHere = !p && !!sea && sea.points.some(([a, b]) => Math.hypot(a - here.lat, (b - here.lon) * Math.cos((a * Math.PI) / 180)) * 111 <= 6);
+    const kn = (v: number) => v.toFixed(1).replace('.', ',');
+    const deg = (v: number) => String(Math.round(v) % 360).padStart(3, '0');
+    $('current-main').textContent = cur ? `Courant ${kn(cur.speed)} kn vers ${deg(cur.dir)}° · ${cur.flood ? 'flot' : 'jusant'}`
+      : sc ? `Courant ${kn(sc.speed)} kn vers ${deg(sc.dir)}° (${compass(sc.dir)})`
+      : p ? 'Courant : hors période des marées'
+      : seaHere ? 'Courant : hors période de prévision'
+      : !tides || !currentGrid ? 'Courant : données indisponibles' : 'Courant : pas d’estimation ici (Zélande et mer du Nord seulement)';
     const parts = [
       cur ? `étale vers ${fmtTime(cur.nextSlack)}` : '',
       // hauteurs en m NAP (≠ zéro des cartes, environ 2 à 2,5 m plus bas) : précisé pour ne pas les additionner aux sondes
       nt?.hw && nt.lw ? `PM ${fmtTime(nt.hw[0])} (${fmt(nt.hw[1])} m NAP), BM ${fmtTime(nt.lw[0])} (${fmt(nt.lw[1])} m NAP) à ${nt.station}${nt.km >= 8 ? ` (${Math.round(nt.km)} km)` : ''}`
         : tides && !nt ? 'marée : pas de station Rijkswaterstaat à moins de 30 km' : '',
       cur ? `${where}, estimation indicative` : '',
+      sc ? `${where}, modèle Mercator (maille ~8 km, marée et vent), indicatif` : '',
     ].filter(Boolean);
     $('current-sub').textContent = parts.join(' · ');
-    $('current-dial').style.visibility = cur ? 'visible' : 'hidden';
-    if (cur) {
-      $('current-needle').style.transform = `rotate(${cur.dir}deg)`;
-      $('current-row').style.setProperty('--needle', currentColourFor(cur.speed, settings.night));
+    const shown = cur ?? sc;
+    $('current-dial').style.visibility = shown ? 'visible' : 'hidden';
+    if (shown) {
+      $('current-needle').style.transform = `rotate(${shown.dir}deg)`;
+      $('current-row').style.setProperty('--needle', currentColourFor(shown.speed, settings.night));
     }
   }
 
   const d = new Date(t);
   const age = wind ? Math.round((Date.now() - wind.fetched) / 3600_000) : 0;
-  const srcs = [settings.windLayer ? `vent KNMI${age >= 1 ? ` d’il y a ${age} h` : ''}` : '', settings.currentLayer ? 'marée RWS, courant estimé' : ''].filter(Boolean).join(', ');
+  const srcs = [settings.windLayer ? `vent KNMI${age >= 1 ? ` d’il y a ${age} h` : ''}` : '', settings.currentLayer ? `marée RWS, courant estimé${sea ? ', modèle Mercator au large' : ''}` : ''].filter(Boolean).join(', ');
   const hm = d.toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' });
   const day = d.toLocaleDateString('fr-BE', { weekday: 'short', day: '2-digit', month: '2-digit' });
   const offH = live ? 0 : Math.round((fixedTime - hourNow()) / 3600_000); // même référence que le curseur

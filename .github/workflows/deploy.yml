@@ -1,5 +1,5 @@
-# Régénère la carte (IENC Zélande + couche indicative mer du Nord, et la grille de courants) quand Rijkswaterstaat publie une nouvelle édition IENC,
-# recalcule les marées, puis déploie l'app + les données sur GitHub Pages. Tourne chaque jour (l'édition est hebdomadaire) et à chaque push.
+# Régénère la carte (IENC Zélande + couche indicative mer du Nord, et la grille de courants estimés) quand Rijkswaterstaat publie une nouvelle édition IENC,
+# recalcule les marées et la prévision de courants en mer du Nord, puis déploie l'app + les données sur GitHub Pages. Tourne chaque jour (l'édition est hebdomadaire) et à chaque push.
 name: deploy
 
 on:
@@ -135,6 +135,7 @@ jobs:
           for f in zeeland.json zeeland.pmtiles currents.json; do
             curl -sfL "${url%/}/tiles/$f" -o "public/tiles/$f"
           done
+          curl -sfL "${url%/}/tiles/ns-current-points.json" -o public/tiles/ns-current-points.json || echo "::warning::pas de mailles de courant mer du Nord publiées"
 
       - name: Conversion et grille de courants
         id: build
@@ -143,6 +144,7 @@ jobs:
         run: |
           uv run python -u -I -W ignore src/northsea.py data/zeeland --cache data/ns -o data/ns-out
           uv run python -u -I -W ignore src/enc2pmtiles.py data/zeeland -o ../public/tiles/zeeland.pmtiles --meta data/zeeland.json --extra data/ns-out --min-bytes 50000000
+          cp data/ns-out/current_points.json ../public/tiles/ns-current-points.json
           if [ -f ../public/tiles/tides.json ]; then
             uv run python -u -I -W ignore src/currents.py data/zeeland --tides ../public/tiles/tides.json -o ../public/tiles/currents.json
           else
@@ -155,6 +157,20 @@ jobs:
         with:
           path: public/tiles
           key: tiles-${{ steps.edition.outputs.date }}-${{ hashFiles('pipeline/src/*.py', 'pipeline/uv.lock') }}
+
+      # Courants mer du Nord (modèle Mercator via Open-Meteo) : prévision recalculée à chaque exécution, après la
+      # sauvegarde de la carte pour ne jamais mettre en cache une prévision périmée
+      - name: Courants mer du Nord
+        working-directory: pipeline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f ../public/tiles/ns-current-points.json ] && uv run python -u -I src/seacurrents.py --points ../public/tiles/ns-current-points.json -o ../public/tiles/seacurrents.json; then
+            exit 0
+          fi
+          echo "::warning::courants mer du Nord indisponibles, reprise de la version publiée"
+          url=$(gh api "repos/${{ github.repository }}/pages" --jq .html_url)
+          curl -sfL "${url%/}/tiles/seacurrents.json" -o ../public/tiles/seacurrents.json || echo "::warning::aucune version publiée des courants mer du Nord"
 
       - uses: actions/setup-node@v4
         with:
