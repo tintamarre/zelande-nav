@@ -7,6 +7,8 @@ Usage:
 Rijkswaterstaat ne publie pas d'IENC pour la mer du Nord, et les cartes marines officielles (NL, BE, UK)
 ne sont pas libres. Cette couche INDICATIVE complète la carte au large, là où l'IENC ne dessine rien :
 - Terre et mer : trait de côte OpenStreetMap (le DTM seul confondrait polders et estran).
+- Ports : le trait de côte OSM ferme l'entrée des ports (Zeebrugge, Ostende…), dont les bassins sont des
+  surfaces d'eau OSM ; celles reliées à la mer sont rendues comme eau sans sondes (UNSARE), pas comme terre.
 - Profondeurs : EMODnet Bathymetry DTM (CC-BY 4.0, maille ~115 m, référence ≈ LAT, le zéro des cartes).
   Pour rester du côté de la prudence, zones et isobathes sont tracées sur le minimum 3 × 3 de la grille
   (un haut-fond est un peu élargi, jamais lissé), et chaque sonde est la moins profonde de son bloc.
@@ -14,6 +16,7 @@ ne sont pas libres. Cette couche INDICATIVE complète la carte au large, là où
   (OpenSeaMap) traduits dans les classes et codes S-57 que l'app sait déjà dessiner.
 Sortie : enc.geojsonl (couche enc de l'IENC, propriété src="ns"), soundg.json (sondes [lon, lat, profondeur],
 élaguées avec celles de l'IENC par enc2pmtiles --extra) + meta.json.
+Ajoute aussi la limite de la carte officielle (M_COVR) et les noms des villes (PLACE, OSM, sur toute l'emprise).
 """
 import argparse
 import glob
@@ -67,7 +70,8 @@ def download(url, path, data=None, tries=4):
 
 def fetch_sources(cache):
     os.makedirs(cache, exist_ok=True)
-    dtm, osm, coast = (os.path.join(cache, n) for n in ("emodnet.tif", "seamarks.json", "coastline.json"))
+    dtm, osm, coast, water, places = (os.path.join(cache, n) for n in
+                                      ("emodnet.tif", "seamarks.json", "coastline.json", "water.json", "places.json"))
     if not os.path.exists(dtm):
         print("téléchargement EMODnet DTM")
         download(WCS.format(*BBOX), dtm)
@@ -75,6 +79,11 @@ def fetch_sources(cache):
     for path, what, q in (
         (osm, "balisage", f'[out:json][timeout:180];(node["seamark:type"]({b});way["seamark:type"]({b}););out geom;'),
         (coast, "trait de côte", f'[out:json][timeout:180];way["natural"="coastline"]({b});out geom;'),
+        # Bassins portuaires, écluses, canaux, rivières : candidats « eau reliée à la mer » (les étangs n'ont pas ces tags)
+        (water, "bassins et canaux", f'[out:json][timeout:180];('
+         f'wr["natural"="water"]["water"~"^(harbour|lock|canal|river|basin|lagoon|tidal)$"]({b});'
+         f'wr["natural"="water"]["tidal"="yes"]({b});wr["natural"="water"]["salt"="yes"]({b}););out geom;'),
+        (places, "villes", f'[out:json][timeout:180];node["place"~"^(city|town)$"]({b});out;'),
     ):
         if os.path.exists(path):
             continue
@@ -95,7 +104,7 @@ def fetch_sources(cache):
                 os.remove(path)  # réponse vide ou invalide : ne pas la garder en cache
         else:
             raise SystemExit(f"Overpass indisponible ({what})")
-    return dtm, osm, coast
+    return dtm, osm, coast, water, places
 
 
 def sea_area(coast_path):
@@ -129,6 +138,81 @@ def sea_area(coast_path):
     sea = unary_union(sea)
     print(f"trait de côte : {len(lines)} lignes, {len(faces)} faces, mer {sea.area / box.area:.0%} de l'emprise")
     return sea, coast
+
+
+def osm_polygons(path):
+    """Surfaces OSM (chemins fermés et multipolygones « out geom ») → [(tags, polygone)]."""
+    out = []
+    for e in json.load(open(path))["elements"]:
+        tags = e.get("tags", {})
+        if e["type"] == "way":
+            c = [(p["lon"], p["lat"]) for p in e.get("geometry", []) if p]
+            if len(c) >= 4 and c[0] == c[-1]:
+                out.append((tags, shapely.make_valid(Polygon(c))))
+        elif e["type"] == "relation":
+            rings = {"outer": [], "inner": []}
+            for m in e.get("members", []):
+                c = [(p["lon"], p["lat"]) for p in m.get("geometry", []) if p]
+                if m.get("type") == "way" and len(c) >= 2 and m.get("role") in rings:
+                    rings[m["role"]].append(LineString(c))
+            if not rings["outer"]:
+                continue
+            outer = unary_union(list(shapely.polygonize(rings["outer"]).geoms))
+            inner = unary_union(list(shapely.polygonize(rings["inner"]).geoms)) if rings["inner"] else None
+            g = outer.difference(inner) if inner is not None else outer
+            if not g.is_empty:
+                out.append((tags, shapely.make_valid(g)))
+    return out
+
+
+def harbour_water(water_path, sea, outside, hops=4):
+    """Bassins, écluses et canaux reliés à la mer (de proche en proche, ~40 m de tolérance pour les portes
+    d'écluse et les jointures imprécises), hors mer et hors emprise IENC. Pas de profondeur : EMODnet ne
+    couvre pas les bassins (il y donne des cotes de terre)."""
+    cands = [(t, g) for t, g in osm_polygons(water_path) if not g.is_empty]
+    tree = shapely.STRtree([g for _, g in cands])
+    frontier, kept = sea, set()
+    for _ in range(hops):
+        hit = {int(i) for i in tree.query(frontier.buffer(0.0005), predicate="intersects")} - kept
+        if not hit:
+            break
+        kept |= hit
+        frontier = unary_union([cands[i][1] for i in hit])
+    feats = []
+    for i in sorted(kept):
+        tags, g = cands[i]
+        g = g.difference(sea).intersection(outside).simplify(0.00005)
+        for q in iter_polys(g):
+            if q.area > 2e-8:  # ~150 m² : pas les liserés le long du trait de côte
+                p = {"objl": "UNSARE"}
+                if tags.get("name"):
+                    p["OBJNAM"] = tags["name"]
+                feats.append(("enc", p, q, 0))
+    print(f"ports et canaux : {len(kept)} surfaces d'eau OSM reliées à la mer, {len(feats)} polygones")
+    return feats, unary_union([f[2] for f in feats]) if feats else Polygon()
+
+
+def coverage_edge(cov, water):
+    """Limite de la carte officielle, là où elle borde de l'eau de la couche indicative."""
+    edge = cov.boundary.intersection(water.buffer(0.0003)).simplify(0.0001)
+    return [("enc", {"objl": "M_COVR"}, ln, 0) for ln in iter_lines(edge) if ln.length > 0.002]
+
+
+def place_features(places_path):
+    """Villes (place=city, dès le zoom 7) et villes moyennes (place=town, dès le zoom 10), sur toute l'emprise :
+    repères pour s'orienter, classés par population pour que les plus grandes l'emportent en cas de collision."""
+    feats = []
+    for e in json.load(open(places_path))["elements"]:
+        tags = e.get("tags", {})
+        name = tags.get("name")  # nom local, celui des panneaux et des cartes
+        if e["type"] != "node" or not name:
+            continue
+        city = tags.get("place") == "city"
+        pop = int(num(tags.get("population")) or 0)
+        feats.append(("enc", {"objl": "PLACE", "OBJNAM": name, "rank": 1 if city else 2, "pop": pop},
+                      Point(e["lon"], e["lat"]), 7 if city else 10))
+    print(f"villes : {len(feats)}")
+    return feats
 
 
 def ienc_coverage(cells_dir):
@@ -390,7 +474,7 @@ def main():
     ap.add_argument("--cache", default="data/ns", help="dossier des téléchargements bruts (gardés d'une exécution à l'autre)")
     ap.add_argument("-o", "--output", required=True)
     a = ap.parse_args()
-    dtm, osm, coast_path = fetch_sources(a.cache)
+    dtm, osm, coast_path, water_path, places_path = fetch_sources(a.cache)
     cov = ienc_coverage(a.cells_dir)
     sea, coast = sea_area(coast_path)
     outside = shapely.box(*BBOX).difference(cov)
@@ -398,16 +482,20 @@ def main():
     shapely.prepare(outside)
     shapely.prepare(outside_sea)
     feats, sound = bathymetry(dtm, outside_sea)
-    # Terre (côté terre du trait de côte) et trait de côte, hors emprise IENC
-    for q in iter_polys(outside.difference(sea).simplify(0.0002)):
+    # Ports et canaux reliés à la mer (eau sans sondes) ; le reste du côté terre du trait de côte est de la terre
+    harbour, harbour_area = harbour_water(water_path, sea, outside)
+    feats += harbour
+    for q in iter_polys(outside.difference(sea).difference(harbour_area).simplify(0.0002)):
         if q.area > 1e-8:
             feats.append(("enc", {"objl": "LNDARE"}, q, 0))
     for ln in iter_lines(coast.intersection(outside)):
         feats.append(("enc", {"objl": "COALNE"}, ln, 0))
-    # Balisage : en mer seulement (marge de ~50 m pour les balises posées sur la laisse) ; les eaux
-    # intérieures que le trait de côte OSM laisse côté terre (port de Rotterdam, Haringvliet) restent hors couche
-    sea_margin = outside_sea.buffer(0.0007).intersection(outside)
+    water = unary_union([outside_sea, harbour_area])
+    feats += coverage_edge(cov, water)
+    # Balisage : en mer et dans les ports (marge de ~50 m pour les balises posées sur la laisse ou un quai)
+    sea_margin = water.buffer(0.0007).intersection(outside)
     feats += seamark_features(osm, sea_margin, shapely.prepared.prep(sea_margin))
+    feats += place_features(places_path)
     if len(sound) < 1000 or sum(1 for f in feats if f[1]["objl"] == "DEPARE") < 50:
         sys.exit("mer du Nord : trop peu d'objets, vérifier les téléchargements")
     write(feats, sound, a.output)

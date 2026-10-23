@@ -105,7 +105,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: pipeline/data/ns
-          key: northsea-${{ steps.month.outputs.month }}
+          key: northsea-v2-${{ steps.month.outputs.month }}  # v2 : + bassins portuaires et villes OSM
 
       - name: Téléchargement des cellules IENC
         id: fetch

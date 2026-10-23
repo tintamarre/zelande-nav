@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Marée astronomique officielle (Rijkswaterstaat, DDL 2.0) des stations de Zélande → pleines et basses mers.
+"""Marée astronomique officielle (Rijkswaterstaat, DDL 2.0) des stations de Zélande et de la côte néerlandaise
+de la mer du Nord → pleines et basses mers.
 
 Usage:
     uv run python -I src/tides.py -o ../public/tiles/tides.json [--days 30]
@@ -26,6 +27,15 @@ STATIONS = {
     "stavenisse": ("Stavenisse", 51.598, 4.004),
     "yerseke": ("Yerseke", 51.5062, 4.0751),
     "krammersluizen.west": ("Krammersluizen west", 51.6593, 4.1443),
+    # Mer du Nord (couche indicative) : côte et large, de la frontière belge à Scheveningen
+    "cadzand.2": ("Cadzand", 51.3793, 3.3763),
+    "vlaktevanderaan": ("Vlakte van de Raan", 51.5037, 3.2422),
+    "brouwersdam.brouwershavensegat.2": ("Brouwershavense Gat", 51.7665, 3.6217),
+    "stellendam.buitenhaven": ("Stellendam", 51.827, 4.0334),
+    "goeree.lichteiland": ("Lichteiland Goeree", 51.925, 3.6684),
+    "europlatform": ("Europlatform", 51.9978, 3.2751),
+    "hoekvanholland": ("Hoek van Holland", 51.9769, 4.1198),
+    "scheveningen": ("Scheveningen", 52.099, 4.2636),
 }
 
 

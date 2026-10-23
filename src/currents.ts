@@ -85,14 +85,17 @@ export function nearestPoint(grid: CurrentGrid, lat: number, lon: number, maxKm 
   return best && Math.sqrt(bd) * 111 <= maxKm ? best : null;
 }
 
-/** Prochaines pleine et basse mers à la station la plus proche. */
-export function nextTides(tides: Tides, lat: number, lon: number, t: number): { station: string; hw?: TideEvent; lw?: TideEvent } | null {
+/** Prochaines pleine et basse mers à la station la plus proche, si elle est à moins de `maxKm`
+ * (au-delà, l'heure de la marée peut différer de plus d'une demi-heure : côte belge, large). */
+export function nextTides(tides: Tides, lat: number, lon: number, t: number, maxKm = 30): { station: string; km: number; hw?: TideEvent; lw?: TideEvent } | null {
   const k = Math.cos((lat * Math.PI) / 180);
   const st = Object.values(tides.stations).reduce<TideStation | null>((a, s) =>
     !a || (s.lat - lat) ** 2 + ((s.lon - lon) * k) ** 2 < (a.lat - lat) ** 2 + ((a.lon - lon) * k) ** 2 ? s : a, null);
   if (!st) return null;
+  const km = Math.hypot(st.lat - lat, (st.lon - lon) * k) * 111;
+  if (km > maxKm) return null;
   const next = st.events.filter((e) => e[0] > t);
-  return { station: st.name, hw: next.find((e) => e[2] === 'H'), lw: next.find((e) => e[2] === 'L') };
+  return { station: st.name, km, hw: next.find((e) => e[2] === 'H'), lw: next.find((e) => e[2] === 'L') };
 }
 
 /** Courants répartis sur l'écran : par case de `spacing` px, le point du chenal (vitesse max la plus forte). */

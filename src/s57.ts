@@ -4,7 +4,7 @@
 export type Props = Record<string, string | number | boolean | undefined>;
 
 export const CLASS_NAMES: Record<string, string> = {
-  DEPARE: 'Zone de profondeur', DEPCNT: 'Isobathe', DRGARE: 'Zone draguée', UNSARE: 'Zone non hydrographiée',
+  DEPARE: 'Zone de profondeur', DEPCNT: 'Isobathe', DRGARE: 'Zone draguée', UNSARE: 'Zone non hydrographiée', M_COVR: 'Limite de la carte officielle',
   LNDARE: 'Terre', COALNE: 'Trait de côte', SLCONS: 'Ouvrage côtier', BUAARE: 'Zone bâtie',
   LAKARE: 'Lac', CANALS: 'Canal', RIVERS: 'Rivière', SEAARE: 'Étendue d’eau', LNDRGN: 'Lieu-dit',
   DYKCON: 'Digue', LNDMRK: 'Amer', BRIDGE: 'Pont', bridge: 'Pont', PONTON: 'Ponton', CAUSWY: 'Chaussée',
@@ -102,7 +102,7 @@ export function describe(p: Props): { title: string; rows: [string, string][] } 
     ['Feu', objl === 'LIGHTS' ? lightLabel(p) : undefined],
     ['Hauteur du feu', m(p.HEIGHT)],
     ['Secteur', p.SECTR1 != null && p.SECTR2 != null ? `${p.SECTR1}° – ${p.SECTR2}°` : undefined],
-    ['Profondeur', p.DRVAL1 != null ? (p.DRVAL2 != null ? `${m(p.DRVAL1)} à ${m(p.DRVAL2)}` : `${m(p.DRVAL1)} et plus`) : undefined],
+    ['Profondeur', objl === 'UNSARE' && p.src === 'ns' ? 'inconnue (bassin sans sondes)' : p.DRVAL1 != null ? (p.DRVAL2 != null ? `${m(p.DRVAL1)} à ${m(p.DRVAL2)}` : `${m(p.DRVAL1)} et plus`) : undefined],
     ['Isobathe', m(p.VALDCO)],
     ['Sonde', p.VALSOU != null ? m(p.VALSOU) : p.depth != null ? m(p.depth) : undefined],
     ['Niveau d’eau', list(p.WATLEV, WATLEV)],
@@ -118,7 +118,8 @@ export function describe(p: Props): { title: string; rows: [string, string][] } 
     ['Info (NL)', (p.NINFOM ?? undefined) as string | undefined],
     // Mer du Nord : hors carte officielle (EMODnet pour les profondeurs, trait de côte OSM pour la terre, OSM pour le reste)
     ['Source', p.src === 'ns' ? (['DEPARE', 'DEPCNT', 'SOUNDG'].includes(objl) ? 'EMODnet (maille ~115 m, indicatif)'
-      : objl === 'LNDARE' ? 'OpenStreetMap / EMODnet (indicatif)' : 'OpenStreetMap (indicatif)') : undefined],
+      : objl === 'LNDARE' ? 'OpenStreetMap / EMODnet (indicatif)' : objl === 'M_COVR' ? 'au-delà : couche indicative'
+      : 'OpenStreetMap (indicatif)') : undefined],
   ];
   return { title, rows: rows.filter((r): r is [string, string] => r[1] != null && r[1] !== '') };
 }

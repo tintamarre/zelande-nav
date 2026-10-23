@@ -9,19 +9,21 @@ const PALETTES = {
   day: {
     nodata: '#cfd3d6', land: '#efe2b0', built: '#dccb8f', coast: '#1a1a1a', contour: '#7b8a9a',
     drying: '#9cc79a', vshallow: '#61b7ff', shallow: '#97cdf9', medium: '#c8e6fb', deep: '#ffffff',
-    unsurveyed: '#bfbfbf', text: '#1a1a1a', soundDeep: '#6b7c8c', soundShallow: '#000000',
+    unsurveyed: '#bfbfbf', harbour: '#dde8ee', edge: '#3d4a57', place: '#5a4a2a', text: '#1a1a1a', soundDeep: '#6b7c8c', soundShallow: '#000000',
     magenta: '#c800c8', halo: 'rgba(255,255,255,0.85)', danger: '#e32020', track: '#ff3b30',
   },
   night: {
     nodata: '#0d0f10', land: '#2a2614', built: '#332e18', coast: '#6e6e5a', contour: '#3a4a5a',
     drying: '#1f3320', vshallow: '#0f2e52', shallow: '#0b2340', medium: '#081a30', deep: '#050c18',
-    unsurveyed: '#202020', text: '#b8a878', soundDeep: '#5a6470', soundShallow: '#c8b880',
+    unsurveyed: '#202020', harbour: '#0c1520', edge: '#7a8a9a', place: '#8a7a50', text: '#b8a878', soundDeep: '#5a6470', soundShallow: '#c8b880',
     magenta: '#a000a0', halo: 'rgba(0,0,0,0.7)', danger: '#c03030', track: '#c03030',
   },
 };
 
 const objl = (...classes: string[]): ExpressionSpecification =>
   classes.length === 1 ? ['==', ['get', 'objl'], classes[0]] : ['match', ['get', 'objl'], classes, true, false];
+
+const isNs: ExpressionSpecification = ['==', ['get', 'src'], 'ns'];
 
 const minzoomOk: ExpressionSpecification = ['>=', ['zoom'], ['coalesce', ['get', 'minz'], 0]];
 
@@ -83,10 +85,13 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
   const layers: LayerSpecification[] = [
     { id: 'bg', type: 'background', paint: { 'background-color': P.nodata } },
     // --- surfaces ---
+    // Mer du Nord (couche indicative, src = ns) : teintes atténuées vers le gris du fond, pour la distinguer
+    // au premier coup d'œil de la carte officielle sans changer les seuils de couleur
     { id: 'depare', type: 'fill', source: 'enc', 'source-layer': 'enc', filter: objl('DEPARE', 'DRGARE'),
-      paint: { 'fill-color': depthColour(), 'fill-antialias': false } },
+      paint: { 'fill-color': depthColour(), 'fill-antialias': false, 'fill-opacity': ['case', isNs, 0.72, 1] } },
+    // Bassins portuaires de la couche indicative : eau sans sondes (gris bleuté), pas « non hydrographié » gris
     { id: 'unsare', type: 'fill', source: 'enc', 'source-layer': 'enc', filter: objl('UNSARE'),
-      paint: { 'fill-color': P.unsurveyed } },
+      paint: { 'fill-color': ['case', isNs, P.harbour, P.unsurveyed] } },
     { id: 'lndare', type: 'fill', source: 'enc', 'source-layer': 'enc', filter: objl('LNDARE'),
       paint: { 'fill-color': P.land } },
     { id: 'buaare', type: 'fill', source: 'enc', 'source-layer': 'enc', filter: objl('BUAARE'),
@@ -117,6 +122,13 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
       filter: ['all', objl('DEPCNT'), ['==', ['get', 'VALDCO'], sc]],
       paint: { 'line-color': s.night ? '#9a8a5a' : '#000000', 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1, 15, 2.2] } },
     // --- côte, ouvrages, lignes ---
+    // Limite de la carte officielle Rijkswaterstaat, côté eau : au-delà, couche indicative
+    { id: 'covr', type: 'line', source: 'enc', 'source-layer': 'enc', filter: objl('M_COVR'),
+      paint: { 'line-color': P.edge, 'line-width': ['interpolate', ['linear'], ['zoom'], 8, 1, 14, 2], 'line-dasharray': [5, 2, 1, 2] } },
+    { id: 'covr-label', type: 'symbol', source: 'enc', 'source-layer': 'enc', filter: objl('M_COVR'), minzoom: 10,
+      layout: { 'symbol-placement': 'line', 'symbol-spacing': 600, 'text-field': 'limite de la carte officielle',
+        'text-font': ['Noto Sans Italic'], 'text-size': 10.5, 'text-offset': [0, -0.8] },
+      paint: { 'text-color': P.edge, 'text-halo-color': P.halo, 'text-halo-width': 1.2 } },
     { id: 'coalne', type: 'line', source: 'enc', 'source-layer': 'enc', filter: objl('COALNE'),
       paint: { 'line-color': P.coast, 'line-width': 1 } },
     { id: 'slcons', type: 'line', source: 'enc', 'source-layer': 'enc', filter: objl('SLCONS', 'DYKCON', 'DAMCON', 'GATCON', 'CAUSWY'),
@@ -142,6 +154,14 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
       layout: { 'text-field': ['get', 'OBJNAM'], 'text-font': ['Noto Sans Italic'], 'text-size': 13,
         'symbol-placement': 'point', 'text-max-width': 8 },
       paint: { 'text-color': s.night ? P.text : '#2b5f8a', 'text-halo-color': P.halo, 'text-halo-width': 1.2 } },
+    // Villes : sous le balisage (qui l'emporte en cas de collision), les plus peuplées d'abord
+    { id: 'places', type: 'symbol', source: 'enc', 'source-layer': 'enc', filter: ['all', objl('PLACE'), minzoomOk],
+      layout: { 'text-field': ['get', 'OBJNAM'], 'text-font': ['Noto Sans Medium'],
+        'text-size': ['case', ['==', ['get', 'rank'], 1], ['interpolate', ['linear'], ['zoom'], 7, 12, 12, 15], 12],
+        'text-transform': ['case', ['==', ['get', 'rank'], 1], 'uppercase', 'none'], 'text-letter-spacing': 0.05,
+        'text-padding': 12, 'symbol-sort-key': ['-', 0, ['coalesce', ['get', 'pop'], 0]] },
+      paint: { 'text-color': P.place, 'text-halo-color': P.halo, 'text-halo-width': 1.4,
+        'text-opacity': ['interpolate', ['linear'], ['zoom'], 13, 1, 15, 0.55] } },
     // --- dangers ---
     { id: 'dangers', type: 'symbol', source: 'enc', 'source-layer': 'enc', filter: ['all', objl('WRECKS', 'OBSTRN', 'UWTROC'), minzoomOk],
       layout: {

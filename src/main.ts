@@ -33,7 +33,7 @@ const map = new maplibregl.Map({
   style: { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#cfd3d6' } }] },
   bounds: ZEELAND,
   fitBoundsOptions: { padding: 20 },
-  maxBounds: [[1.0, 50.5], [6, 52.8]], // Zélande et mer du Nord voisine
+  maxBounds: [[1.0, 50.5], [6, 52.8]], // resserrée sur l'emprise de la carte dès son chargement (loadChart)
   minZoom: 7,
   maxZoom: 19,
   attributionControl: { compact: true },
@@ -152,14 +152,16 @@ function renderPanel() {
   if (settings.currentLayer) {
     const p = tides && currentGrid ? nearestPoint(currentGrid, here.lat, here.lon) : null;
     const cur = p ? currentAt(p, tides!, t) : null;
-    const nt = p && tides ? nextTides(tides, here.lat, here.lon, t) : null;
+    // Marée : à la station la plus proche, aussi là où il n'y a pas d'estimation de courant (mer du Nord)
+    const nt = tides ? nextTides(tides, here.lat, here.lon, t) : null;
     $('current-main').textContent = !tides || !currentGrid ? 'Courant : données indisponibles'
       : cur ? `Courant ${cur.speed.toFixed(1).replace('.', ',')} kn vers ${String(Math.round(cur.dir)).padStart(3, '0')}° · ${cur.flood ? 'flot' : 'jusant'}`
-      : p ? 'Courant : hors période des marées' : 'Courant : pas d’estimation ici (eaux sans marée ou estran)';
+      : p ? 'Courant : hors période des marées' : 'Courant : pas d’estimation ici (estimé en Zélande seulement)';
     const parts = [
       cur ? `étale vers ${fmtTime(cur.nextSlack)}` : '',
       // hauteurs en m NAP (≠ zéro des cartes, environ 2 à 2,5 m plus bas) : précisé pour ne pas les additionner aux sondes
-      nt?.hw && nt.lw ? `PM ${fmtTime(nt.hw[0])} (${fmt(nt.hw[1])} m NAP), BM ${fmtTime(nt.lw[0])} (${fmt(nt.lw[1])} m NAP) à ${nt.station}` : '',
+      nt?.hw && nt.lw ? `PM ${fmtTime(nt.hw[0])} (${fmt(nt.hw[1])} m NAP), BM ${fmtTime(nt.lw[0])} (${fmt(nt.lw[1])} m NAP) à ${nt.station}${nt.km >= 8 ? ` (${Math.round(nt.km)} km)` : ''}`
+        : tides && !nt ? 'marée : pas de station Rijkswaterstaat à moins de 30 km' : '',
       cur ? `${where}, estimation indicative` : '',
     ].filter(Boolean);
     $('current-sub').textContent = parts.join(' · ');
@@ -240,11 +242,15 @@ async function loadChart() {
     map.setStyle({ version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#cfd3d6' } }] });
     updateEditionUi();
     $('edition').textContent = 'carte indisponible hors connexion : téléchargez-la une fois en ligne';
+    $('edition').hidden = false; // seul cas où le bouton ⓘ affiche un texte
     toast('Pas de carte : connectez-vous pour la télécharger.');
     return;
   }
   protocol.add(current.pm);
   sourceUrl = `pmtiles://${current.pm.source.getKey()}`;
+  // Pas de défilement loin au-delà des données (le fond gris n'apprend rien) : emprise + ~10 km
+  const [w, s, e, n] = current.manifest.bounds;
+  map.setMaxBounds([[w - 0.15, s - 0.1], [e + 0.15, n + 0.1]]);
   applyStyle();
   updateEditionUi();
   if (current.offline && remote && remote.sha256_16 !== current.manifest.sha256_16) {
@@ -256,6 +262,7 @@ async function loadChart() {
 function updateEditionUi() {
   const m = current?.manifest ?? null;
   $('edition').textContent = formatEdition(m);
+  $('edition').hidden = true;
   $('about-edition').textContent = formatEdition(m);
   $('offline-badge').hidden = !current?.offline;
   $('chart-btn').classList.toggle('ok', !!current?.offline);
@@ -263,7 +270,7 @@ function updateEditionUi() {
 
 // ---------- identification au tap ----------
 const QUERY_LAYERS = ['buoys', 'beacons', 'lights', 'topmar', 'dangers', 'notmrk', 'harbour', 'bridge-line', 'bridge-fill',
-  'cblohd', 'clearance', 'ofsplf', 'areas', 'tsezne', 'soundg', 'soundg-drying', 'depare'];
+  'cblohd', 'clearance', 'ofsplf', 'areas', 'tsezne', 'soundg', 'soundg-drying', 'covr', 'depare', 'unsare'];
 
 map.on('click', (e) => {
   const r = 12;
@@ -412,8 +419,10 @@ function checkShallows(f: Fix) {
       // Pas de zone de profondeur : terre, digue ou zone non hydrographiée
       const other = map.queryRenderedFeatures(px, { layers: ['lndare', 'unsare'].filter((l) => map.getLayer(l)) });
       const land = other.some((o) => o.properties.objl === 'LNDARE');
-      if (i > 0 && other.length) raise(1, `${land ? 'Terre' : 'Zone non hydrographiée'} ${ahead}`);
-      else if (i === 0 && !land && other.length) raise(2, 'Zone non hydrographiée sous le bateau');
+      // Bassin portuaire de la couche indicative : de l'eau, mais sans aucune sonde
+      const what = land ? 'Terre' : other.some((o) => o.properties.src === 'ns') ? 'Bassin sans sondes' : 'Zone non hydrographiée';
+      if (i > 0 && other.length) raise(1, `${what} ${ahead}`);
+      else if (i === 0 && !land && other.length) raise(2, `${what} sous le bateau : profondeur inconnue`);
     }
     const near = map.queryRenderedFeatures([[px.x - 10, px.y - 10], [px.x + 10, px.y + 10]], { layers: ['alarm-dangers'] });
     const hit = near.find((n) => isDangerous(n.properties as Props, safety));
