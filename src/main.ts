@@ -36,7 +36,7 @@ const map = new maplibregl.Map({
   maxBounds: [[1.0, 50.5], [6, 52.8]], // resserrée sur l'emprise de la carte dès son chargement (loadChart)
   minZoom: 7,
   maxZoom: 19,
-  attributionControl: { compact: true },
+  attributionControl: false, // sources et mentions dans « À propos » (bouton ⓘ unique, en bas à droite)
   dragRotate: false,
   pitchWithRotate: false,
 });
