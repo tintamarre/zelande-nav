@@ -105,7 +105,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: pipeline/data/ns
-          key: northsea-v2-${{ steps.month.outputs.month }}  # v2 : + bassins portuaires et villes OSM
+          key: northsea-v3-${{ steps.month.outputs.month }}  # v3 : emprise élargie au Pas de Calais et à la Tamise
 
       - name: Téléchargement des cellules IENC
         id: fetch

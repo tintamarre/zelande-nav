@@ -36,7 +36,7 @@ const map = new maplibregl.Map({
   style: { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#cfd3d6' } }] },
   bounds: ZEELAND,
   fitBoundsOptions: { padding: 20 },
-  maxBounds: [[1.0, 50.5], [6, 52.8]], // resserrée sur l'emprise de la carte dès son chargement (loadChart)
+  maxBounds: [[0.0, 50.2], [6, 52.8]], // resserrée sur l'emprise de la carte dès son chargement (loadChart)
   minZoom: 7,
   maxZoom: 19,
   attributionControl: false, // sources et mentions dans « À propos » (bouton ⓘ unique, en bas à droite)

@@ -1,4 +1,4 @@
-// Prévisions de vent (modèle KNMI HARMONIE via Open-Meteo, CC-BY 4.0) sur une grille couvrant la Zélande et la mer du Nord voisine.
+// Prévisions de vent (modèle KNMI HARMONIE via Open-Meteo, CC-BY 4.0) sur une grille couvrant la Zélande, la mer du Nord voisine et le Pas de Calais.
 // La dernière prévision est gardée sur l'appareil pour rester consultable hors-ligne.
 
 export interface WindForecast {
@@ -10,11 +10,12 @@ export interface WindForecast {
 const KEY = 'zn.wind';
 const MAX_AGE_MS = 3 * 3600_000; // au-delà : on tente de rafraîchir
 
-// Grille 0,15° couvrant l'emprise de la carte, mer du Nord comprise (51,0–52,2 °N × 2,0–4,55 °E : 9 × 18 = 162 points)
-const ROWS = 9, COLS = 18;
+// Grille 0,2° couvrant l'emprise de la carte, du Pas de Calais à Rotterdam (50,6–52,2 °N × 0,5–4,7 °E : 9 × 22 = 198 points ;
+// maille un peu plus large qu'avant pour garder une seule requête de taille raisonnable)
+const ROWS = 9, COLS = 22;
 function grid(): { lat: number; lon: number }[] {
   const pts = [];
-  for (let i = 0; i < ROWS; i++) for (let j = 0; j < COLS; j++) pts.push({ lat: +(51.0 + i * 0.15).toFixed(2), lon: +(2.0 + j * 0.15).toFixed(2) });
+  for (let i = 0; i < ROWS; i++) for (let j = 0; j < COLS; j++) pts.push({ lat: +(50.6 + i * 0.2).toFixed(2), lon: +(0.5 + j * 0.2).toFixed(2) });
   return pts;
 }
 

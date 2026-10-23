@@ -39,8 +39,9 @@ from numpy.lib.stride_tricks import sliding_window_view
 from shapely.geometry import LineString, Point, Polygon, mapping
 from shapely.ops import unary_union
 
-# Emprise : de Dunkerque aux abords de Rotterdam, jusqu'aux routes du large
-BBOX = (2.0, 51.0, 4.6, 52.3)  # lon min, lat min, lon max, lat max
+# Emprise : de Boulogne et de l'estuaire de la Tamise aux abords de Rotterdam (Pas de Calais, côtes française,
+# belge et anglaise du sud de la mer du Nord) ; les sources en cache sont refaites si elle change
+BBOX = (0.5, 50.6, 4.6, 52.3)  # lon min, lat min, lon max, lat max
 WCS = ("https://ows.emodnet-bathymetry.eu/wcs?service=WCS&version=2.0.1&request=GetCoverage&CoverageId=emodnet__mean"
        "&format=image/tiff&subset=Lat({1},{3})&subset=Long({0},{2})")
 OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"]
@@ -52,6 +53,7 @@ LEVELS = [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8, 10,
 # Zoom d'apparition des isobathes : principales tôt, intermédiaires (0,5 m) seulement de près
 CONTOUR_MINZ = {5: 9, 10: 9, 20: 9, 0: 10, 2: 10, 30: 10, 50: 10}
 LAND = -4.0  # au-dessus de 4 m (LAT) : terre (dunes, digues) plutôt qu'estran
+DEEP_SOUNDING = 15.0  # m : au-delà, sondes deux fois plus espacées (carte plus légère)
 
 OPEN_OPTS = {"UPDATES": "APPLY", "RETURN_PRIMITIVES": "OFF", "RETURN_LINKAGES": "OFF", "LNAM_REFS": "OFF"}
 
@@ -72,8 +74,14 @@ def download(url, path, data=None, tries=4):
 
 def fetch_sources(cache):
     os.makedirs(cache, exist_ok=True)
-    dtm, osm, coast, water, places = (os.path.join(cache, n) for n in
-                                      ("emodnet.tif", "seamarks.json", "coastline.json", "water.json", "places.json"))
+    names = ("emodnet.tif", "seamarks.json", "coastline.json", "water.json", "places.json")
+    dtm, osm, coast, water, places = (os.path.join(cache, n) for n in names)
+    stamp = os.path.join(cache, "bbox.json")
+    if not os.path.exists(stamp) or json.load(open(stamp)) != list(BBOX):
+        for n in names:  # emprise modifiée : sources à retélécharger
+            if os.path.exists(os.path.join(cache, n)):
+                os.remove(os.path.join(cache, n))
+        json.dump(list(BBOX), open(stamp, "w"))
     if not os.path.exists(dtm):
         print("téléchargement EMODnet DTM")
         download(WCS.format(*BBOX), dtm)
@@ -167,23 +175,23 @@ def osm_polygons(path):
     return out
 
 
-def harbour_water(water_path, sea, outside, hops=4):
+def harbour_water(water_path, sea_t, outside_t, hops=4):
     """Bassins, écluses et canaux reliés à la mer (de proche en proche, ~40 m de tolérance pour les portes
     d'écluse et les jointures imprécises), hors mer et hors emprise IENC. Pas de profondeur : EMODnet ne
     couvre pas les bassins (il y donne des cotes de terre)."""
     cands = [(t, g) for t, g in osm_polygons(water_path) if not g.is_empty]
     tree = shapely.STRtree([g for _, g in cands])
-    frontier, kept = sea, set()
+    frontier, kept = sea_t.pieces, set()
     for _ in range(hops):
-        hit = {int(i) for i in tree.query(frontier.buffer(0.0005), predicate="intersects")} - kept
+        hit = {int(i) for i in tree.query(frontier, predicate="dwithin", distance=0.0005)[1]} - kept
         if not hit:
             break
         kept |= hit
-        frontier = unary_union([cands[i][1] for i in hit])
+        frontier = [cands[i][1] for i in hit]
     feats = []
     for i in sorted(kept):
         tags, g = cands[i]
-        g = g.difference(sea).intersection(outside).simplify(0.00005)
+        g = outside_t.clip(g.difference(sea_t.local(g))).simplify(0.00005)
         for q in iter_polys(g):
             if q.area > 2e-8:  # ~150 m² : pas les liserés le long du trait de côte
                 p = {"objl": "UNSARE"}
@@ -194,10 +202,12 @@ def harbour_water(water_path, sea, outside, hops=4):
     return feats, unary_union([f[2] for f in feats]) if feats else Polygon()
 
 
-def coverage_edge(cov, water):
+def coverage_edge(cov, water_t):
     """Limite de la carte officielle, là où elle borde de l'eau de la couche indicative."""
-    edge = cov.boundary.intersection(water.buffer(0.0003)).simplify(0.0001)
-    return [("enc", {"objl": "M_COVR"}, ln, 0) for ln in iter_lines(edge) if ln.length > 0.002]
+    near_water = water_t.buffered(0.0003)
+    edge = unary_union([near_water.clip(b) for b in split(cov.boundary)])
+    edge = shapely.line_merge(edge) if edge.geom_type == "MultiLineString" else edge
+    return [("enc", {"objl": "M_COVR"}, ln.simplify(0.0001), 0) for ln in iter_lines(edge) if ln.length > 0.002]
 
 
 def place_features(places_path):
@@ -267,7 +277,56 @@ def iter_lines(g):
     return []
 
 
-def bathymetry(dtm_path, outside):
+def split(g, max_coords=4000, depth=0):
+    """Découpe une géométrie très détaillée en morceaux rectangulaires de moins de `max_coords` sommets."""
+    if g.is_empty:
+        return []
+    if shapely.get_num_coordinates(g) <= max_coords or depth > 16:
+        return [g]
+    x0, y0, x1, y1 = g.bounds
+    halves = ((x0, y0, (x0 + x1) / 2, y1), ((x0 + x1) / 2, y0, x1, y1)) if x1 - x0 > y1 - y0 \
+        else ((x0, y0, x1, (y0 + y1) / 2), (x0, (y0 + y1) / 2, x1, y1))
+    return [q for h in halves for q in split(g.intersection(shapely.box(*h)), max_coords, depth + 1)]
+
+
+class Tiles:
+    """Zone très découpée (côte anglaise, Tamise et criques) gardée en morceaux : une géométrie n'est comparée
+    qu'aux morceaux qu'elle touche, au lieu du contour entier (même résultat, des dizaines de fois plus vite)."""
+
+    def __init__(self, pieces):
+        self.pieces = [q for q in pieces if not q.is_empty]
+        self.tree = shapely.STRtree(self.pieces)
+
+    @classmethod
+    def of(cls, area):
+        return cls(split(area))
+
+    def near(self, g):
+        return [self.pieces[i] for i in self.tree.query(g)]
+
+    def local(self, g):
+        """Partie de la zone dans l'emprise de g."""
+        near = self.near(g)
+        return unary_union(near) if near else Polygon()
+
+    def clip(self, g):
+        """g ∩ zone (morceaux recollés : les coupes des morceaux sont communes, l'union les efface)."""
+        parts = [q for q in shapely.intersection(g, self.near(g)) if not q.is_empty] if not g.is_empty else []
+        if not parts:
+            return Polygon()
+        out = unary_union(parts)
+        return shapely.line_merge(out) if out.geom_type == "MultiLineString" else out
+
+    def contains(self, pt):
+        return len(self.tree.query(pt, predicate="within")) > 0
+
+    def buffered(self, d, within=None):
+        """Zone élargie de d (morceau par morceau), éventuellement limitée à une autre zone."""
+        out = [q.buffer(d) for q in self.pieces]
+        return Tiles([within.clip(q) for q in out] if within else out)
+
+
+def bathymetry(dtm_path, outside, tiles):
     with rasterio.open(dtm_path) as r:
         elev = r.read(1).astype("float64")
         t = r.transform
@@ -284,7 +343,7 @@ def bathymetry(dtm_path, outside):
     bounds = [-1000.0, LAND] + LEVELS + [1000.0]
     for lo, hi in zip(bounds[:-1], bounds[1:]):
         for p in polygons_from_filled(gen.filled(lo, hi)):
-            g = p.intersection(outside).simplify(0.0002)
+            g = tiles.clip(p).simplify(0.0002)
             for q in iter_polys(g):
                 if q.area < 1e-8:
                     continue
@@ -300,25 +359,31 @@ def bathymetry(dtm_path, outside):
             ln0 = LineString(seg)
             if ln0.length < 0.004 and ln0.is_ring:  # anneau de moins de ~300 m : bruit de la grille
                 continue
-            g = ln0.intersection(outside).simplify(0.0002)
+            g = tiles.clip(ln0).simplify(0.0002)
             for ln in iter_lines(g):
                 feats.append(("enc", {"objl": "DEPCNT", "VALDCO": v}, ln, CONTOUR_MINZ.get(v, 12)))
-    # Sondes : la moins profonde de chaque bloc de 4 × 4 mailles (~460 m), en eau ou sur l'estran
-    k = 4
+    # Sondes : la moins profonde de chaque bloc de 4 × 4 mailles (~460 m), en eau ou sur l'estran ; au large
+    # (tout le bloc de 8 × 8 à plus de DEEP_SOUNDING m), une seule pour 8 × 8 (~920 m) : carte plus légère,
+    # sans perdre de détail là où le fond compte
     sound = []
-    for i in range(0, ny - k + 1, k):
-        for j in range(0, nx - k + 1, k):
-            blk = depth[i:i + k, j:j + k]
-            if np.all(np.isnan(blk)):
+
+    def shoalest(i, j, k):
+        blk = depth[i:i + k, j:j + k]
+        if np.all(np.isnan(blk)):
+            return None
+        a, b = np.unravel_index(np.nanargmin(blk), blk.shape)
+        return float(lon[j + b]), float(lat[i + a]), blk[a, b]
+
+    for i in range(0, ny - 7, 8):
+        for j in range(0, nx - 7, 8):
+            big = shoalest(i, j, 8)
+            if big is None:
                 continue
-            a, b = np.unravel_index(np.nanargmin(blk), blk.shape)
-            d = blk[a, b]
-            if d < LAND:
-                continue
-            x, y = float(lon[j + b]), float(lat[i + a])
-            if not outside.contains(Point(x, y)):
-                continue
-            sound.append((x, y, math.floor(d * 10) / 10))  # arrondi vers le moins profond
+            cands = [big] if big[2] > DEEP_SOUNDING else [shoalest(i + di, j + dj, 4) for di in (0, 4) for dj in (0, 4)]
+            for c in cands:
+                if c is None or c[2] < LAND or not outside.contains(Point(c[0], c[1])):
+                    continue
+                sound.append((c[0], c[1], math.floor(c[2] * 10) / 10))  # arrondi vers le moins profond
     print(f"bathymétrie : {len(feats)} zones et isobathes, {len(sound)} sondes")
     return feats, sound
 
@@ -374,7 +439,7 @@ def num(v):
         return None
 
 
-def seamark_features(osm_path, outside, prep_sea):
+def seamark_features(osm_path, margin_t):
     elements = json.load(open(osm_path))["elements"]
     feats = []
     for e in elements:
@@ -389,7 +454,7 @@ def seamark_features(osm_path, outside, prep_sea):
         # géométrie
         if e["type"] == "node":
             geom = Point(e["lon"], e["lat"])
-            if not prep_sea.contains(geom):
+            if not margin_t.contains(geom):
                 continue  # dans l'emprise IENC (la carte officielle prime) ou en eaux intérieures
         else:
             coords = [(p["lon"], p["lat"]) for p in e.get("geometry", []) if p]
@@ -398,7 +463,7 @@ def seamark_features(osm_path, outside, prep_sea):
             closed = coords[0] == coords[-1] and len(coords) >= 4
             area_cls = objl in {"TSEZNE", "RESARE", "ACHARE", "PRCARE", "CBLARE", "PIPARE", "MARCUL", "DMPGRD", "FAIRWY", "TSSLPT", "HRBFAC", "SMCFAC"}
             geom = shapely.make_valid(Polygon(coords)) if closed and area_cls else LineString(coords)
-            geom = geom.intersection(outside)
+            geom = margin_t.clip(geom)
             if geom.is_empty:
                 continue
             if objl in ("HRBFAC", "SMCFAC"):
@@ -455,16 +520,18 @@ def seamark_features(osm_path, outside, prep_sea):
     return feats
 
 
-def current_points(outside_sea):
+def current_points(outside_sea_t):
     """Mailles du modèle de courants SMOC (Mercator, 1/12°, centres en k/12 + 1/24) en mer du Nord, hors carte
     officielle et à plus de ~1 km de la côte (le modèle n'y résout ni les chenaux ni les bancs).
     seacurrents.py y lit chaque jour la prévision (Open-Meteo) ; en Zélande, l'estimation de currents.py prime."""
-    inner = outside_sea.buffer(-0.012)
-    lats = np.arange(BBOX[1] + 1 / 24, BBOX[3], 1 / 12)
-    lons = np.arange(BBOX[0] + 1 / 24, BBOX[2], 1 / 12)
-    lon, lat = np.meshgrid(lons, lats)
-    keep = shapely.contains_xy(inner, lon, lat)
-    pts = [[round(float(y), 4), round(float(x), 4)] for x, y in zip(lon[keep], lat[keep])]
+    # Test maille par maille (disque de ~1,2 km entièrement en mer) : un buffer négatif de toute la zone
+    # (côte anglaise détaillée) demandait plus de 15 Go de mémoire
+    pts = []
+    for y in np.arange(BBOX[1] + 1 / 24, BBOX[3], 1 / 12):
+        for x in np.arange(BBOX[0] + 1 / 24, BBOX[2], 1 / 12):
+            disc = Point(x, y).buffer(0.012)
+            if outside_sea_t.local(disc).contains(disc):
+                pts.append([round(float(y), 4), round(float(x), 4)])
     print(f"courants mer du Nord : {len(pts)} mailles du modèle")
     return pts
 
@@ -499,24 +566,24 @@ def main():
     outside_sea = outside.intersection(sea)
     shapely.prepare(outside)
     shapely.prepare(outside_sea)
-    feats, sound = bathymetry(dtm, outside_sea)
+    outside_t, sea_t, outside_sea_t = Tiles.of(outside), Tiles.of(sea), Tiles.of(outside_sea)
+    feats, sound = bathymetry(dtm, outside_sea, outside_sea_t)
     # Ports et canaux reliés à la mer (eau sans sondes) ; le reste du côté terre du trait de côte est de la terre
-    harbour, harbour_area = harbour_water(water_path, sea, outside)
+    harbour, harbour_area = harbour_water(water_path, sea_t, outside_t)
     feats += harbour
     for q in iter_polys(outside.difference(sea).difference(harbour_area).simplify(0.0002)):
         if q.area > 1e-8:
             feats.append(("enc", {"objl": "LNDARE"}, q, 0))
     for ln in iter_lines(coast.intersection(outside)):
         feats.append(("enc", {"objl": "COALNE"}, ln, 0))
-    water = unary_union([outside_sea, harbour_area])
-    feats += coverage_edge(cov, water)
+    water_t = Tiles(outside_sea_t.pieces + split(harbour_area))
+    feats += coverage_edge(cov, water_t)
     # Balisage : en mer et dans les ports (marge de ~50 m pour les balises posées sur la laisse ou un quai)
-    sea_margin = water.buffer(0.0007).intersection(outside)
-    feats += seamark_features(osm, sea_margin, shapely.prepared.prep(sea_margin))
+    feats += seamark_features(osm, water_t.buffered(0.0007, within=outside_t))
     feats += place_features(places_path)
     if len(sound) < 1000 or sum(1 for f in feats if f[1]["objl"] == "DEPARE") < 50:
         sys.exit("mer du Nord : trop peu d'objets, vérifier les téléchargements")
-    write(feats, sound, a.output, current_points(outside_sea))
+    write(feats, sound, a.output, current_points(outside_sea_t))
 
 
 if __name__ == "__main__":

@@ -29,10 +29,10 @@ cd pipeline
 uv sync
 uv run python -I src/fetch_ienc.py --area zeeland --dest data          # ~47 Mo, 61 cellules S-57
 uv run python -I -W ignore src/northsea.py data/zeeland \
-    --cache data/ns -o data/ns-out                                       # couche mer du Nord (~2 min)
+    --cache data/ns -o data/ns-out                                       # couche mer du Nord (~3 min, ~2,5 Go de RAM)
 uv run python -I -W ignore src/enc2pmtiles.py data/zeeland \
     -o ../public/tiles/zeeland.pmtiles --meta data/zeeland.json \
-    --extra data/ns-out                                                  # ~3 min 30, ~70 Mo
+    --extra data/ns-out                                                  # ~4 min, ~90 Mo
 uv run python -I src/inspect_cells.py data/zeeland                      # inventaire : échelles, emprise, zéro
 uv run python -I src/tides.py -o ../public/tiles/tides.json             # marées officielles (30 jours)
 uv run python -I -W ignore src/currents.py data/zeeland \
@@ -66,12 +66,12 @@ Le GPS du navigateur exige HTTPS (ou `localhost`). Pour tester sur un téléphon
 ## Hors-ligne
 
 - Le service worker (vite-plugin-pwa) met en cache l'app, les polices et les icônes.
-- La carte se télécharge explicitement (bouton ⬇, ~70 Mo) dans le Cache Storage ; elle est lue par tranches (`Blob.slice`) sans réseau. Une seule édition est gardée ; l'app signale quand une plus récente est publiée.
+- La carte se télécharge explicitement (bouton ⬇, ~90 Mo) dans le Cache Storage ; elle est lue par tranches (`Blob.slice`) sans réseau. Une seule édition est gardée ; l'app signale quand une plus récente est publiée.
 - Sans téléchargement, la carte est lue en ligne par requêtes Range.
 
 ## Mer du Nord (couche indicative)
 
-Rijkswaterstaat ne publie pas d'IENC pour la mer du Nord, et les cartes marines officielles NL, BE et UK ne sont pas libres. `pipeline/src/northsea.py` complète donc la carte au large (2,0–4,6 °E × 51,0–52,3 °N, de Dunkerque aux abords de Rotterdam), uniquement là où l'IENC ne dessine rien :
+Rijkswaterstaat ne publie pas d'IENC pour la mer du Nord, et les cartes marines officielles NL, BE et UK ne sont pas libres. `pipeline/src/northsea.py` complète donc la carte au large (0,5–4,6 °E × 50,6–52,3 °N, de Boulogne et de l'estuaire de la Tamise aux abords de Rotterdam), uniquement là où l'IENC ne dessine rien :
 
 - terre et mer : trait de côte OpenStreetMap (orienté terre à gauche), pour ne pas confondre polders et estran ;
 - profondeurs : EMODnet Bathymetry DTM (CC-BY 4.0, maille ~115 m, ≈ zéro des cartes LAT), zones et isobathes tracées sur le minimum 3 × 3 de la grille (prudence) avec toutes les isobathes possibles du contour de sécurité, sondes = la moins profonde de chaque bloc de ~460 m ;
@@ -86,7 +86,7 @@ Les objets sont fusionnés dans le même PMTiles (couches `enc` et `soundg`, pro
   - `pipeline/src/tides.py` : marée astronomique officielle Rijkswaterstaat (Waterwebservices DDL 2.0, `WATHTE` / `astronomisch`) de 8 stations (Westkapelle, Vlissingen, Terneuzen, Hansweert, Roompot, Stavenisse, Yerseke, Krammer) sur 30 jours → pleines/basses mers et marnage moyen (`tides.json`, recalculé chaque jour par la CI).
   - `pipeline/src/currents.py` : grille d'environ 900 m sur les eaux reliées à la mer sans ouvrage (sas, portes, barrages retirés : Veerse Meer, Grevelingen, Volkerak-Zoommeer et canaux exclus), direction du flot le long de l'axe des voies navigables orientée vers l'amont de l'onde de marée, vitesse maximale par bassin modulée par la profondeur, réduite hors chenal et dans les ports (`currents.json`).
   - App : flot de l'étale de basse mer à l'étale de pleine mer (étale ≈ 35 min après PM/BM locale), demi-sinusoïde entre deux étales, modulée par le marnage du jour (vives-eaux / mortes-eaux) ; bandeau avec courant au bateau, prochaine étale, prochaines PM/BM. Données gardées pour le hors-ligne.
-  - Mer du Nord (hors carte officielle) : au large, la marée se propage le long de la côte et le courant tourne environ 3 h après la pleine mer, ce que le modèle d'atlas ne reproduit pas. On y affiche la **prévision du modèle Mercator SMOC** (Copernicus Marine, maille 1/12° ≈ 8 km, marée + vent + circulation), servie par l'API marine d'Open-Meteo (CC-BY 4.0) : `northsea.py` choisit les mailles en mer à plus de ~1 km de la côte (`ns-current-points.json`), `seacurrents.py` en récupère chaque jour en CI la série horaire de la veille à J+4 (`seacurrents.json`, ~170 Ko), interpolée à l'heure du curseur par l'app.
+  - Mer du Nord (hors carte officielle) : au large, la marée se propage le long de la côte et le courant tourne environ 3 h après la pleine mer, ce que le modèle d'atlas ne reproduit pas. On y affiche la **prévision du modèle Mercator SMOC** (Copernicus Marine, maille 1/12° ≈ 8 km, marée + vent + circulation), servie par l'API marine d'Open-Meteo (CC-BY 4.0) : `northsea.py` choisit les mailles en mer à plus de ~1 km de la côte (`ns-current-points.json`), `seacurrents.py` en récupère chaque jour en CI la série horaire de la veille à J+4 (`seacurrents.json`), interpolée à l'heure du curseur par l'app. Limite mesurée : comparée aux stations Rijkswaterstaat, la marée du modèle est en avance de 25 à 45 min et son marnage sous-estimé (15 à 55 %) ; elle n'est donc pas utilisée pour les heures de pleine et basse mer (aucune autre source libre côté français, belge ou anglais), et l'app le signale dans « À propos ».
 - Vent et courant partagent le curseur horaire (−6 h à +72 h, « Maintenant » suit l'heure courante).
 
 ## Mobile
