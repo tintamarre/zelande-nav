@@ -34,11 +34,13 @@
       <svg id="current-dial" class="dial" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="18"/><path id="current-needle" class="needle" d="M20 5 L26 15 L21.2 13.8 L21.2 35 L18.8 35 L18.8 13.8 L14 15 Z"/></svg>
       <div><b id="current-main">–</b><span id="current-sub"></span></div>
     </div>
-    <div id="time-main" aria-live="polite"></div>
-    <div class="env-time">
-      <input id="time-range" type="range" min="-6" max="72" step="1" value="0" aria-label="Heure affichée (de −6 h à +72 h)">
-      <button id="time-prev" type="button" aria-label="Une heure plus tôt">−1 h</button>
+    <div class="env-head">
+      <div id="time-main" aria-live="polite"></div>
       <button id="time-now" type="button">Maintenant</button>
+    </div>
+    <div class="env-time">
+      <button id="time-prev" type="button" aria-label="Une heure plus tôt">−1 h</button>
+      <input id="time-range" type="range" min="-6" max="72" step="1" value="0" aria-label="Heure affichée (de −6 h à +72 h)">
       <button id="time-next" type="button" aria-label="Une heure plus tard">+1 h</button>
     </div>
     <span id="time-label" class="time-src"></span>

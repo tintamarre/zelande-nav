@@ -182,7 +182,7 @@ function renderPanel() {
       : sc ? `Courant ${kn(sc.speed)} kn vers ${deg(sc.dir)}° (${compass(sc.dir)})`
       : p ? 'Courant : hors période des marées'
       : seaHere ? 'Courant : hors période de prévision'
-      : !tides || !currentGrid ? 'Courant : données indisponibles' : 'Courant : pas d’estimation ici (Zélande et mer du Nord seulement)';
+      : !tides || !currentGrid ? 'Courant : données indisponibles' : 'Courant : pas d’estimation ici';
     const parts = [
       cur ? `étale vers ${fmtTime(cur.nextSlack)}` : '',
       // hauteurs en m NAP (≠ zéro des cartes, environ 2 à 2,5 m plus bas) ou en m ZC (zéro des cartes, ports voisins) :
@@ -203,14 +203,16 @@ function renderPanel() {
 
   const d = new Date(t);
   const age = wind ? Math.round((Date.now() - wind.fetched) / 3600_000) : 0;
-  const srcs = [settings.windLayer ? `vent KNMI${age >= 1 ? ` d’il y a ${age} h` : ''}` : '', settings.currentLayer ? `marée RWS, courant estimé${sea ? ', modèle Mercator au large' : ''}` : ''].filter(Boolean).join(', ');
+  // Sources dans « À propos » ; ici seulement l'âge d'une prévision de vent qui n'a pas pu être rafraîchie
+  const srcs = settings.windLayer && wind && age >= 1 ? `Prévision de vent d’il y a ${age} h` : '';
   const hm = d.toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' });
   const day = d.toLocaleDateString('fr-BE', { weekday: 'short', day: '2-digit', month: '2-digit' });
   const offH = live ? 0 : Math.round((fixedTime - hourNow()) / 3600_000); // même référence que le curseur
   const tm = $('time-main');
   tm.classList.toggle('future', !live);
   const sub = document.createElement('small');
-  sub.textContent = `${day} · ${live ? 'maintenant' : `${offH > 0 ? '+' : offH < 0 ? '−' : ''}${Math.abs(offH)} h`}`;
+  // « maintenant » sous-entendu (bouton à côté) : décalage affiché seulement quand l'heure a été déplacée
+  sub.textContent = live ? day : `${day} · ${offH > 0 ? '+' : offH < 0 ? '−' : ''}${Math.abs(offH)} h`;
   tm.replaceChildren(hm, sub);
   $('time-label').textContent = srcs;
 }

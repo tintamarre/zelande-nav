@@ -63,10 +63,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 #alarm-status { color: var(--muted); font-size: 12px; }
 #alarm-status:empty { display: none; }
 #alarm-status.suspended { color: var(--danger); font-weight: 600; }
-.update { pointer-events: auto; margin-left: 6px; align-self: flex-start; border: 0; border-radius: 8px; padding: 5px 9px;
+.update { pointer-events: auto; align-self: flex-start; border: 0; border-radius: 8px; padding: 5px 9px;
   background: var(--accent); color: #fff; font: inherit; font-size: 12px; cursor: pointer; }
 
-#envpanel { position: absolute; top: calc(var(--safe-top) + 64px); left: 8px; right: 70px; display: flex; flex-direction: column; gap: 4px;
+#envpanel { position: absolute; top: calc(var(--safe-top) + 8px); left: 8px; right: 70px; display: flex; flex-direction: column; gap: 4px;
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12px; }
 .env-row { display: flex; gap: 10px; align-items: center; }
 .env-row div { display: flex; flex-direction: column; min-width: 0; }
@@ -75,9 +75,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 .dial { width: 36px; height: 36px; flex: none; }
 .dial circle { fill: none; stroke: var(--border); stroke-width: 2; }
 .needle { fill: var(--needle, #2f7fd8); transition: transform 0.4s; transform-origin: 20px 20px; }
-/* Curseur horaire : piste et poignée larges pour le doigt, boutons ±1 h en dessous */
-.env-time { display: grid; grid-template-columns: 1fr auto 1fr; gap: 6px; align-items: center; }
-.env-time input { grid-column: 1 / -1; width: 100%; min-width: 0; height: 40px; margin: 0; background: transparent;
+/* Heure et « Maintenant » sur une ligne, puis curseur encadré des boutons ±1 h : panneau compact, cibles larges */
+.env-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.env-time { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+.env-time input { width: 100%; min-width: 0; height: 40px; margin: 0; background: transparent;
   -webkit-appearance: none; appearance: none; touch-action: none; cursor: pointer; }
 .env-time input::-webkit-slider-runnable-track { height: 8px; border-radius: 4px; background: var(--border); }
 .env-time input::-moz-range-track { height: 8px; border-radius: 4px; background: var(--border); }
@@ -85,17 +86,20 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
   background: var(--accent); border: 3px solid var(--bg); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35); }
 .env-time input::-moz-range-thumb { width: 28px; height: 28px; border-radius: 50%; background: var(--accent);
   border: 3px solid var(--bg); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35); }
-.env-time button { font: inherit; font-size: 16px; min-height: 48px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);
+.env-time button, #time-now { font: inherit; font-size: 16px; min-height: 48px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);
   background: transparent; color: var(--fg); touch-action: manipulation; user-select: none; -webkit-touch-callout: none; -webkit-user-select: none; cursor: pointer; }
-#time-now { font-size: 13px; }
+#time-now { font-size: 13px; flex: none; }
 /* Heure affichée : lisible d'un coup d'œil (plein soleil, embruns) ; en couleur quand ce n'est pas « maintenant » */
-#time-main { display: flex; align-items: baseline; gap: 8px; margin-top: 4px; font-size: 20px; font-weight: 700;
+#time-main { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; min-width: 0; font-size: 20px; font-weight: 700;
   font-variant-numeric: tabular-nums; color: var(--fg); }
 #time-main small { font-size: 14px; font-weight: 600; color: var(--muted); }
 #time-main.future { color: var(--accent); }
 #time-main.future small { color: var(--accent); }
 :root[data-theme='night'] #time-main.future, :root[data-theme='night'] #time-main.future small { color: var(--fg); }
 #time-label { color: var(--muted); font-size: 11px; }
+#time-label:empty { display: none; }
+/* Panneau vent/marée tout en haut (le bouton ⓘ est en bas) ; sous le bandeau « Nouvelle version » quand il est affiché */
+#topbar:has(#update-btn:not([hidden])) ~ #envpanel { top: calc(var(--safe-top) + 48px); }
 #alarm { position: absolute; left: 50%; transform: translateX(-50%); top: calc(var(--safe-top) + 120px); z-index: 5;
   display: flex; gap: 12px; align-items: center; background: var(--danger); color: #fff; padding: 10px 14px;
   border-radius: 10px; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.3); max-width: calc(100% - 32px); animation: pulse 1s infinite alternate; }
