@@ -12,6 +12,7 @@ de la période (vives-eaux et mortes-eaux comprises), utilisé pour le coefficie
 import argparse
 import datetime as dt
 import json
+import math
 import sys
 import urllib.request
 
@@ -58,6 +59,9 @@ def fetch(code, start, end):
     return sorted(out)
 
 
+MIN_SWING = 0.3  # m : écart minimal entre une PM et une BM voisines (marnage ≥ 1 m sur toutes les stations)
+
+
 def extremes(series):
     """Pleines et basses mers : extrêmes locaux sur ±1 h, affinés par parabole sur 3 points."""
     ev = []
@@ -72,14 +76,30 @@ def extremes(series):
         denom = h0 - 2 * h + h2
         dtp = 0.0 if denom == 0 else 0.5 * (h0 - h2) / denom * (t2 - t0) / 2
         ev.append([round((t + dtp) * 1000), round(h, 2), kind])
-    # plateaux : garder un seul extrême par type sur 3 h
+    # plateaux et double basse mer sans rebond marqué : un seul extrême par type sur 5 h
     clean = []
     for e in ev:
-        if clean and clean[-1][2] == e[2] and e[0] - clean[-1][0] < 3 * 3600_000:
+        if clean and clean[-1][2] == e[2] and e[0] - clean[-1][0] < 5 * 3600_000:
             if (e[2] == "H" and e[1] > clean[-1][1]) or (e[2] == "L" and e[1] < clean[-1][1]):
                 clean[-1] = e
             continue
         clean.append(e)
+    # Double basse mer (Stellendam, Hoek van Holland, Scheveningen…) : le petit rebond entre les deux basses
+    # mers n'est pas une pleine mer. Paire voisine au plus faible écart d'abord : le rebond est celui des deux
+    # qui est aussi proche de son autre voisin ; on le retire avec le moins extrême de ses deux voisins.
+    while len(clean) >= 3:
+        swing = [abs(b[1] - a[1]) for a, b in zip(clean, clean[1:])]
+        j = min(range(len(swing)), key=swing.__getitem__)
+        if swing[j] >= MIN_SWING:
+            break
+        left = swing[j - 1] if j > 0 else math.inf
+        right = swing[j + 1] if j + 1 < len(swing) else math.inf
+        bump = j if left <= right else j + 1
+        nb = [k for k in (bump - 1, bump + 1) if 0 <= k < len(clean)]
+        sign = -1 if clean[nb[0]][2] == "L" else 1  # garder la plus basse des BM, la plus haute des PM
+        drop = min(nb, key=lambda k: sign * clean[k][1])
+        for k in sorted({bump, drop}, reverse=True):
+            del clean[k]
     return clean
 
 

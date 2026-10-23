@@ -23,6 +23,7 @@ import glob
 import json
 import math
 import os
+import re
 import sys
 import time
 import urllib.parse
@@ -208,7 +209,7 @@ def place_features(places_path):
         if e["type"] != "node" or not name:
             continue
         city = tags.get("place") == "city"
-        pop = int(num(tags.get("population")) or 0)
+        pop = int(re.sub(r"\D", "", (tags.get("population") or "").split(";")[0]) or 0)  # « 11 500 », « 11.500 »
         feats.append(("enc", {"objl": "PLACE", "OBJNAM": name, "rank": 1 if city else 2, "pop": pop},
                       Point(e["lon"], e["lat"]), 7 if city else 10))
     print(f"villes : {len(feats)}")
