@@ -14,7 +14,7 @@ import {
   type SeaCurrents, seaCurrentNear, seaScreenFeatures, type Tides,
 } from './currents';
 import { registerSymbols } from './symbols';
-import { type Track, type TrackPoint, deleteTrack, destination, exportGpx, listTracks, saveTrack, trackNm } from './track';
+import { type Note, type Track, type TrackPoint, deleteNote, deleteTrack, destination, listNotes, listTracks, notesGpx, notesOf, notesText, saveNote, saveTrack, shareFile, toGpx, trackNm } from './track';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const GLYPHS = new URL('fonts/', new URL(import.meta.env.BASE_URL, location.href)).href;
@@ -56,7 +56,7 @@ function applyStyle() {
   map.setStyle(buildStyle(settings, sourceUrl, GLYPHS), { diff: sourceUrl === styledSource });
   styledSource = sourceUrl;
   // Les données GeoJSON (bateau, trace) sont remises après un changement de style
-  map.once('styledata', () => { renderTrack(); renderLayers(); if (boat.active && boat.last) renderBoat(boat.last); });
+  map.once('styledata', () => { renderTrack(); renderNotes(); renderLayers(); if (boat.active && boat.last) renderBoat(boat.last); });
 }
 
 // ---------- couches vent et courant : échelle de temps commune ----------
@@ -305,6 +305,13 @@ const QUERY_LAYERS = ['buoys', 'beacons', 'lights', 'topmar', 'dangers', 'notmrk
 
 map.on('click', (e) => {
   const r = 12;
+  // Note de bord touchée : son texte, pas les objets de la carte dessous
+  const note = map.getLayer('notes') ? map.queryRenderedFeatures([[e.point.x - r, e.point.y - r], [e.point.x + r, e.point.y + r]], { layers: ['notes'] })[0] : undefined;
+  if (note) {
+    const n = notes.find((x) => x.id === note.properties.id);
+    if (n) new maplibregl.Popup({ maxWidth: '300px' }).setLngLat([n.lon, n.lat]).setHTML(`<div class="ident"><h3>Note ${note.properties.n} · ${esc(fmtNoteTime(n.t))}</h3><p style="white-space:pre-wrap">${esc(n.text)}</p></div>`).addTo(map);
+    return;
+  }
   const layers = QUERY_LAYERS.filter((l) => map.getLayer(l));
   const feats = map.queryRenderedFeatures([[e.point.x - r, e.point.y - r], [e.point.x + r, e.point.y + r]], { layers });
   if (!feats.length) return;
@@ -621,7 +628,7 @@ async function refreshTracks() {
     const li = document.createElement('li');
     li.innerHTML = `<span>${esc(t.name)}<br><small>${trackNm(t.points).toFixed(1)} M · ${t.points.length} pts</small></span>`;
     const gpx = Object.assign(document.createElement('button'), { type: 'button', textContent: 'GPX' });
-    gpx.onclick = () => exportGpx(t);
+    gpx.onclick = () => shareFile(`${fileSafe(t.name)}.gpx`, toGpx(t, notesOf(t, notes)), 'application/gpx+xml', t.name);
     const del = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Suppr.', className: 'secondary' });
     del.onclick = async () => { if (confirm(`Supprimer « ${t.name} » ?`)) { await deleteTrack(t.id); refreshTracks(); } };
     const actions = document.createElement('span');
@@ -632,7 +639,72 @@ async function refreshTracks() {
   if (!tracks.length) list.innerHTML = '<li><small>Aucune trace enregistrée.</small></li>';
 }
 
-$('track-btn').onclick = () => { refreshTracks(); $<HTMLDialogElement>('track-dlg').showModal(); };
+$('track-btn').onclick = () => { refreshTracks(); refreshNotes(); $<HTMLDialogElement>('track-dlg').showModal(); };
+
+// ---------- notes de bord ----------
+let notes: Note[] = [];
+const fileSafe = (s: string) => s.replace(/[^\w-]+/g, '_');
+const fmtNoteTime = (t: number) => new Date(t).toLocaleString('fr-BE', { dateStyle: 'short', timeStyle: 'short' });
+
+function renderNotes() {
+  const src = map.getSource('notes') as GeoJSONSource | undefined;
+  if (!src) return;
+  // Numéro dans la journée (1, 2, 3…), comme dans un livre de bord
+  const count = new Map<string, number>();
+  src.setData({ type: 'FeatureCollection', features: notes.map((n) => {
+    const day = new Date(n.t).toDateString();
+    count.set(day, (count.get(day) ?? 0) + 1);
+    return { type: 'Feature', properties: { id: n.id, n: count.get(day) }, geometry: { type: 'Point', coordinates: [n.lon, n.lat] } };
+  }) });
+}
+
+async function refreshNotes() {
+  notes = await listNotes();
+  renderNotes();
+  const list = $('note-list');
+  list.innerHTML = '';
+  for (const n of [...notes].reverse()) {
+    const li = document.createElement('li');
+    li.innerHTML = `<span><small>${esc(fmtNoteTime(n.t))}${n.approx ? ' · position approx.' : ''}</small><br>${esc(n.text)}</span>`;
+    const del = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Suppr.', className: 'secondary' });
+    del.onclick = async () => { if (confirm('Supprimer cette note ?')) { await deleteNote(n.id); refreshNotes(); } };
+    li.append(del);
+    list.append(li);
+  }
+  if (!notes.length) list.innerHTML = '<li><small>Aucune note.</small></li>';
+  for (const id of ['notes-txt', 'notes-gpx']) $<HTMLButtonElement>(id).disabled = !notes.length;
+}
+
+// Instant et position figés à l'appui (pas à l'enregistrement : on peut écrire plusieurs minutes plus tard)
+let draft: Omit<Note, 'text'> | null = null;
+$('note-btn').onclick = () => {
+  const f = boat.active && boat.last && Date.now() - boat.last.t < 60_000 ? boat.last : null;
+  const c = map.getCenter();
+  const now = Date.now();
+  draft = f ? { id: now, t: now, lat: f.lat, lon: f.lon, sog: +f.sog.toFixed(1), cog: f.cog ?? undefined }
+    : { id: now, t: now, lat: c.lat, lon: c.lng, approx: true };
+  $('note-where').textContent = `${fmtNoteTime(now)} · ${formatLatLon(draft.lat, draft.lon)}${f ? '' : ' (centre de la carte : pas de position GPS)'}`;
+  $<HTMLTextAreaElement>('note-text').value = '';
+  $<HTMLDialogElement>('note-dlg').showModal();
+};
+// Raccourcis : ajoutent le mot au texte (utilisables avec des gants)
+for (const b of $('note-chips').querySelectorAll('button')) {
+  b.onclick = () => {
+    const ta = $<HTMLTextAreaElement>('note-text');
+    ta.value = ta.value.trim() ? `${ta.value.trim()} · ${b.textContent}` : b.textContent ?? '';
+  };
+}
+$<HTMLDialogElement>('note-dlg').addEventListener('close', async () => {
+  const text = $<HTMLTextAreaElement>('note-text').value.trim();
+  if ($<HTMLDialogElement>('note-dlg').returnValue !== 'save' || !draft || !text) { draft = null; return; }
+  await saveNote({ ...draft, text });
+  draft = null;
+  toast('Note enregistrée');
+  refreshNotes();
+});
+$('notes-txt').onclick = () => shareFile(`journal-de-bord-${new Date().toISOString().slice(0, 10)}.txt`, notesText(notes, formatLatLon), 'text/plain;charset=utf-8', 'Journal de bord');
+$('notes-gpx').onclick = () => shareFile(`notes-de-bord-${new Date().toISOString().slice(0, 10)}.gpx`, notesGpx(notes), 'application/gpx+xml', 'Notes de bord');
+refreshNotes();
 $('track-toggle').onclick = () => toggleRecording();
 
 // ---------- réglages ----------

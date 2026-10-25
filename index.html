@@ -60,6 +60,9 @@
     <button id="track-btn" type="button" title="Trace" aria-label="Enregistrer la trace">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/></svg>
     </button>
+    <button id="note-btn" type="button" title="Note de bord" aria-label="Ajouter une note de bord (heure et position)">
+      <svg viewBox="0 0 24 24"><path d="M4 20l1-4L16 5l3 3L8 19z M14 7l3 3" fill="none"/></svg>
+    </button>
     <button id="wind-btn" type="button" title="Vent" aria-label="Afficher ou masquer le vent" aria-pressed="false">
       <svg viewBox="0 0 24 24"><path d="M3 8h11a3 3 0 1 0-3-3M3 12h16a3 3 0 1 1-3 3M3 16h8" fill="none"/></svg>
     </button>
@@ -116,7 +119,28 @@
       <h2>Traces</h2>
       <p><button id="track-toggle" type="button">Démarrer l’enregistrement</button></p>
       <ul id="track-list"></ul>
+      <h2>Journal de bord</h2>
+      <p class="small">Notes prises avec le bouton ✎. Elles sont aussi dans le GPX de la trace pendant laquelle elles ont été prises.</p>
+      <p><button id="notes-txt" type="button">Journal (texte)</button> <button id="notes-gpx" type="button">Notes (GPX)</button></p>
+      <ul id="note-list"></ul>
       <menu><button value="close" class="secondary">Fermer</button></menu>
+    </form>
+  </dialog>
+
+  <dialog id="note-dlg">
+    <form method="dialog">
+      <h2>Note de bord</h2>
+      <p class="small" id="note-where"></p>
+      <div class="chips" id="note-chips">
+        <button type="button">Départ</button><button type="button">Arrivée</button><button type="button">Ris pris</button>
+        <button type="button">Ris largué</button><button type="button">Moteur en route</button><button type="button">Moteur stoppé</button>
+        <button type="button">Mouillage</button><button type="button">Amarré</button>
+      </div>
+      <textarea id="note-text" rows="4" placeholder="Événement, météo, observation… (micro du clavier pour dicter)"></textarea>
+      <menu>
+        <button value="cancel" class="secondary" formnovalidate>Annuler</button>
+        <button id="note-save" value="save">Enregistrer</button>
+      </menu>
     </form>
   </dialog>
 

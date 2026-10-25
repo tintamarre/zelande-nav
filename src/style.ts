@@ -257,6 +257,12 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
       paint: { 'text-color': windColour, 'text-halo-color': P.halo, 'text-halo-width': 2, 'icon-opacity': 0.8 } },
     // --- bateau ---
     { id: 'track', type: 'line', source: 'track', paint: { 'line-color': P.track, 'line-width': 2, 'line-opacity': 0.8 } },
+    // Notes de bord : pastilles numérotées (ordre chronologique du jour), toucher pour lire
+    { id: 'notes', type: 'circle', source: 'notes',
+      paint: { 'circle-radius': 9, 'circle-color': s.night ? '#8a6a00' : '#f2b705', 'circle-stroke-color': P.coast, 'circle-stroke-width': 1.5 } },
+    { id: 'notes-label', type: 'symbol', source: 'notes',
+      layout: { 'text-field': ['to-string', ['get', 'n']], 'text-font': ['Noto Sans Medium'], 'text-size': 11, 'text-allow-overlap': true },
+      paint: { 'text-color': '#1a1a1a' } },
     { id: 'vector', type: 'line', source: 'boat', filter: ['==', ['geometry-type'], 'LineString'],
       paint: { 'line-color': P.track, 'line-width': 2, 'line-dasharray': [2, 1.5] } },
     { id: 'accuracy', type: 'circle', source: 'boat', filter: ['==', ['geometry-type'], 'Point'],
@@ -277,6 +283,7 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
       enc: { type: 'vector', url: sourceUrl, attribution: 'Rijkswaterstaat (CC-0) | Mer du Nord : EMODnet Bathymetry (CC-BY 4.0), © OpenStreetMap (ODbL)' },
       boat: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
       track: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+      notes: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
       wind: { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, attribution: 'Vent : KNMI via Open-Meteo (CC-BY 4.0)' },
       current: { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, attribution: 'Courants estimés d’après la marée Rijkswaterstaat ; mer du Nord : Mercator SMOC via Open-Meteo (CC-BY 4.0)' },
     },

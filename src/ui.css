@@ -129,9 +129,9 @@ dialog .legal { border-left: 3px solid var(--danger); padding-left: 10px; }
 dialog progress { width: 100%; }
 #gps-diag summary { cursor: pointer; font-size: 14px; }
 #gps-diag-list { margin: 4px 0 0; padding-left: 18px; }
-#track-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
-#track-list li { display: flex; gap: 8px; align-items: center; justify-content: space-between; border-top: 1px solid var(--border); padding-top: 6px; }
-#track-list li button { min-height: 44px; padding: 4px 12px; font-size: 14px; }
+#track-list, #note-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+#track-list li, #note-list li { display: flex; gap: 8px; align-items: center; justify-content: space-between; border-top: 1px solid var(--border); padding-top: 6px; }
+#track-list li button, #note-list li button { min-height: 44px; padding: 4px 12px; font-size: 14px; }
 
 /* Popup d'identification */
 .maplibregl-popup-content { background: var(--bg); color: var(--fg); border-radius: 10px; padding: 10px 12px; max-height: 50vh; overflow: auto; }
@@ -144,3 +144,10 @@ dialog progress { width: 100%; }
 
 .maplibregl-ctrl-bottom-left { bottom: var(--safe-bottom); }
 :root[data-theme='night'] .maplibregl-ctrl-scale { background: var(--panel); color: var(--fg); }
+
+/* Notes de bord */
+#note-list { max-height: 40vh; overflow-y: auto; }
+#note-list li span { white-space: pre-wrap; overflow-wrap: anywhere; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { min-height: 44px; padding: 4px 12px; border-radius: 22px; border: 1px solid var(--border); background: var(--panel); color: var(--fg); font: inherit; font-size: 14px; }
+#note-text { font: inherit; font-size: 16px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--fg); resize: vertical; }
