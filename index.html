@@ -60,7 +60,7 @@
     <button id="track-btn" type="button" title="Trace" aria-label="Enregistrer la trace">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/></svg>
     </button>
-    <button id="note-btn" type="button" title="Note de bord" aria-label="Ajouter une note de bord (heure et position)">
+    <button id="note-btn" type="button" hidden title="Note de bord" aria-label="Ajouter une note de bord (heure et position)">
       <svg viewBox="0 0 24 24"><path d="M4 20l1-4L16 5l3 3L8 19z M14 7l3 3" fill="none"/></svg>
     </button>
     <button id="wind-btn" type="button" title="Vent" aria-label="Afficher ou masquer le vent" aria-pressed="false">
@@ -120,7 +120,7 @@
       <p><button id="track-toggle" type="button">Démarrer l’enregistrement</button></p>
       <ul id="track-list"></ul>
       <h2>Journal de bord</h2>
-      <p class="small">Notes prises avec le bouton ✎. Elles sont aussi dans le GPX de la trace pendant laquelle elles ont été prises.</p>
+      <p class="small">Pendant l’enregistrement, le bouton ✎ note un événement avec l’heure et la position. Les notes sont aussi dans le GPX de leur trace.</p>
       <p><button id="notes-txt" type="button">Journal (texte)</button> <button id="notes-gpx" type="button">Notes (GPX)</button></p>
       <ul id="note-list"></ul>
       <menu><button value="close" class="secondary">Fermer</button></menu>

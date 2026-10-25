@@ -47,6 +47,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 #tools button { width: 52px; height: 52px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel);
   color: var(--fg); display: grid; place-items: center; cursor: pointer; padding: 0; }
 #tools svg { width: 26px; height: 26px; stroke: currentColor; stroke-width: 2; fill: currentColor; stroke-linecap: round; }
+#tools button[hidden] { display: none; }
 #tools button.on { background: var(--accent); color: #fff; }
 #tools button.following { background: var(--on); color: #fff; }
 #track-btn.on svg { fill: var(--danger); stroke: #fff; }
@@ -60,9 +61,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 #instruments small { color: var(--muted); font-size: 11px; }
 #instruments .pos { grid-column: 1 / -1; font-size: 13px; }
 #instruments.shallow #depth { color: var(--danger); }
-#alarm-status { color: var(--muted); font-size: 12px; }
+#instruments #alarm-status { color: var(--muted); font-size: 12px; white-space: normal; } /* message long : retour à la ligne, pas coupé */
 #alarm-status:empty { display: none; }
-#alarm-status.suspended { color: var(--danger); font-weight: 600; }
+#instruments #alarm-status.suspended { color: var(--danger); font-weight: 600; }
 .update { pointer-events: auto; align-self: flex-start; border: 0; border-radius: 8px; padding: 5px 9px;
   background: var(--accent); color: #fff; font: inherit; font-size: 12px; cursor: pointer; }
 
@@ -147,6 +148,7 @@ dialog progress { width: 100%; }
 
 /* Notes de bord */
 #note-list { max-height: 40vh; overflow-y: auto; }
+#track-list + h2 { margin-top: 14px; padding-top: 12px; border-top: 2px solid var(--border); }
 #note-list li span { white-space: pre-wrap; overflow-wrap: anywhere; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chips button { min-height: 44px; padding: 4px 12px; border-radius: 22px; border: 1px solid var(--border); background: var(--panel); color: var(--fg); font: inherit; font-size: 14px; }

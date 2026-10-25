@@ -612,7 +612,9 @@ async function toggleRecording() {
     keepAwake(true);
   }
   $('track-btn').classList.toggle('on', !!recording);
+  $('note-btn').hidden = !recording; // une note appartient à une trace
   renderTrack();
+  renderNotes();
   refreshTracks();
 }
 
@@ -649,9 +651,10 @@ const fmtNoteTime = (t: number) => new Date(t).toLocaleString('fr-BE', { dateSty
 function renderNotes() {
   const src = map.getSource('notes') as GeoJSONSource | undefined;
   if (!src) return;
-  // Numéro dans la journée (1, 2, 3…), comme dans un livre de bord
+  // Comme la trace : seulement les notes de l'enregistrement en cours (id = heure de début), numérotées 1, 2, 3…
+  const shown = recording ? notes.filter((n) => n.t >= recording!.id) : [];
   const count = new Map<string, number>();
-  src.setData({ type: 'FeatureCollection', features: notes.map((n) => {
+  src.setData({ type: 'FeatureCollection', features: shown.map((n) => {
     const day = new Date(n.t).toDateString();
     count.set(day, (count.get(day) ?? 0) + 1);
     return { type: 'Feature', properties: { id: n.id, n: count.get(day) }, geometry: { type: 'Point', coordinates: [n.lon, n.lat] } };
