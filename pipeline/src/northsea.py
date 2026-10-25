@@ -348,7 +348,9 @@ def bathymetry(dtm_path, outside, tiles):
                 if q.area < 1e-8:
                     continue
                 if hi <= LAND:
-                    feats.append(("enc", {"objl": "LNDARE"}, q, 0))
+                    # « Terre » du DTM du côté mer du trait de côte OSM : maille de ~115 m à cheval sur une digue
+                    # ou un bassin (Ramsgate, Douvres). Eau sans sondes plutôt que des blocs de terre dans le port.
+                    feats.append(("enc", {"objl": "UNSARE"}, q, 0))
                 else:
                     d1, d2 = (LAND, 0) if hi <= 0 else (lo, hi)
                     feats.append(("enc", {"objl": "DEPARE", "DRVAL1": d1, "DRVAL2": d2 if hi < 1000 else None}, q, 0))
