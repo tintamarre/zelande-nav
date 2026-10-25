@@ -6,6 +6,7 @@
 //   light|<COLOUR>                   feux (flamme)
 //   warrow|<couleur>                 flèche de vent
 //   carrow|<couleur>                 flèche de courant
+//   mark|<anchor|danger|info>        repères de l'utilisateur (épingle)
 //   wreck, rock, obstn, isodgr, notice, harbour, underline, boat
 // Ils sont générés sur l'événement « styleimagemissing » de MapLibre.
 import type { Map as MlMap } from 'maplibre-gl';
@@ -168,6 +169,30 @@ const STATIC: Record<string, () => ImageData> = {
   }),
 };
 
+// Repère de l'utilisateur : épingle 24 × 32, pointe en bas (icon-anchor bottom), pictogramme blanc
+const MARK_COLOUR: Record<string, string> = { anchor: '#1f5fd0', danger: '#d0021b', info: '#2e7d32' };
+function mark(kind: string) {
+  const col = MARK_COLOUR[kind];
+  if (!col) return undefined;
+  return make(24, 32, (c) => {
+    c.beginPath();
+    c.moveTo(12, 31); c.bezierCurveTo(9, 24, 2, 19, 2, 12); c.arc(12, 12, 10, Math.PI, 0); c.bezierCurveTo(22, 19, 15, 24, 12, 31); c.closePath();
+    c.fillStyle = col; c.fill(); c.strokeStyle = '#ffffff'; c.lineWidth = 1.8; c.stroke();
+    c.strokeStyle = '#ffffff'; c.fillStyle = '#ffffff'; c.lineWidth = 1.8;
+    if (kind === 'anchor') {
+      c.beginPath(); c.arc(12, 6.5, 1.6, 0, 7); c.stroke();
+      c.beginPath(); c.moveTo(12, 8); c.lineTo(12, 18); c.moveTo(8.5, 10.5); c.lineTo(15.5, 10.5);
+      c.moveTo(6.5, 14); c.quadraticCurveTo(12, 21, 17.5, 14); c.stroke();
+    } else if (kind === 'danger') {
+      c.beginPath(); c.moveTo(12, 5.5); c.lineTo(12, 14); c.stroke();
+      c.beginPath(); c.arc(12, 17.5, 1.4, 0, 7); c.fill();
+    } else {
+      c.beginPath(); c.arc(12, 6.8, 1.4, 0, 7); c.fill();
+      c.beginPath(); c.moveTo(12, 10); c.lineTo(12, 18); c.stroke();
+    }
+  });
+}
+
 // Flèche de vent pointant vers le nord (sens d'écoulement ; rotation = direction vers laquelle il souffle)
 function windArrow(colour: string) {
   return make(24, 36, (c) => {
@@ -201,6 +226,7 @@ export function registerSymbols(map: MlMap) {
     else if (kind === 'light') img = light(a);
     else if (kind === 'warrow') img = windArrow(a || INK);
     else if (kind === 'carrow') img = currentArrow(a || INK);
+    else if (kind === 'mark') img = mark(a);
     else if (STATIC[kind]) img = STATIC[kind]();
     if (!img) return;
     map.addImage(id, img, {

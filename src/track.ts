@@ -2,8 +2,11 @@
 
 export interface TrackPoint { t: number; lat: number; lon: number; sog?: number; cog?: number }
 export interface Track { id: number; name: string; points: TrackPoint[] }
-/** Note de bord : instant et position pris à l'appui sur le bouton ; `approx` = centre de la carte (pas de GPS). */
-export interface Note { id: number; t: number; lat: number; lon: number; text: string; sog?: number; cog?: number; approx?: boolean }
+/** Type de repère : une note qui reste sur la carte (mouillage, danger, info), au lieu d'une entrée du journal liée à une trace. */
+export type MarkKind = 'anchor' | 'danger' | 'info';
+export const MARK_LABEL: Record<MarkKind, string> = { anchor: 'Mouillage', danger: 'Danger', info: 'Info' };
+/** Note de bord : instant et position pris à l'appui sur le bouton ; `approx` = centre de la carte (pas de GPS) ; `mark` = repère permanent. */
+export interface Note { id: number; t: number; lat: number; lon: number; text: string; sog?: number; cog?: number; approx?: boolean; mark?: MarkKind }
 
 const DB = 'zn-tracks';
 type StoreName = 'tracks' | 'notes';
@@ -47,7 +50,9 @@ export const notesOf = (t: Track, notes: Note[]) =>
   t.points.length ? notes.filter((n) => n.t >= t.points[0].t && n.t <= t.points.at(-1)!.t) : [];
 
 const xml = (s: string) => s.replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c]!);
-const firstLine = (s: string) => (s.split('\n')[0] || 'Note').slice(0, 40);
+export const firstLine = (s: string) => (s.split('\n')[0] || 'Note').slice(0, 40);
+// Symboles GPX courants (Garmin, repris par OpenCPN et la plupart des applications)
+const GPX_SYM: Record<MarkKind, string> = { anchor: 'Anchor', danger: 'Danger Area', info: 'Information' };
 
 /** Notes en points de passage GPX (<wpt>) : épingles avec texte dans OpenCPN, Navionics, Google Earth… */
 function gpxWaypoints(notes: Note[]): string {
@@ -55,7 +60,7 @@ function gpxWaypoints(notes: Note[]): string {
     <time>${new Date(n.t).toISOString()}</time>
     <name>${xml(firstLine(n.text))}</name>
     <desc>${xml(n.text + (n.approx ? '\n(position approximative : centre de la carte, sans GPS)' : ''))}</desc>
-    <sym>Flag</sym>
+    <sym>${n.mark ? GPX_SYM[n.mark] : 'Flag'}</sym>${n.mark ? `\n    <type>${MARK_LABEL[n.mark]}</type>` : ''}
   </wpt>
 `).join('');
 }
@@ -81,19 +86,29 @@ ${pts}
 `);
 }
 
-export const notesGpx = (notes: Note[]) => gpx('Journal de bord', gpxWaypoints(notes));
+export const notesGpx = (notes: Note[], name = 'Journal de bord') => gpx(name, gpxWaypoints(notes));
 
-/** Journal de bord lisible : une note par paragraphe, heure locale, position en degrés-minutes. */
-export function notesText(notes: Note[], fmtPos: (lat: number, lon: number) => string): string {
+/** Journal de bord en Markdown (texte brut lisible partout, mis en forme par Obsidian, Joplin, GitHub…) :
+ *  un titre par jour, une entrée par note (heure, position, vitesse), puis les repères. */
+export function notesMarkdown(notes: Note[], fmtPos: (lat: number, lon: number) => string): string {
+  const out: string[] = ['# Journal de bord – Zélande Nav', ''];
+  const pos = (n: Note) => `${fmtPos(n.lat, n.lon)}${n.approx ? ' (approx., sans GPS)' : ''}`;
   let day = '';
-  const out: string[] = ['Journal de bord – Zélande Nav', ''];
-  for (const n of notes) {
+  for (const n of notes.filter((x) => !x.mark)) {
     const d = new Date(n.t);
     const dd = d.toLocaleDateString('fr-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-    if (dd !== day) { out.push(`== ${dd} ==`, ''); day = dd; }
+    if (dd !== day) { out.push(`## ${dd[0].toUpperCase()}${dd.slice(1)}`, ''); day = dd; }
     const hh = d.toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' });
     const nav = n.sog != null ? ` · ${n.sog.toFixed(1).replace('.', ',')} kn${n.cog != null ? ` au ${String(Math.round(n.cog)).padStart(3, '0')}°` : ''}` : '';
-    out.push(`${hh} · ${fmtPos(n.lat, n.lon)}${n.approx ? ' (approx., sans GPS)' : ''}${nav}`, n.text, '');
+    out.push(`### ${hh} · ${pos(n)}${nav}`, '', n.text, '');
+  }
+  const marks = notes.filter((x) => x.mark);
+  if (marks.length) {
+    out.push('## Repères', '');
+    for (const n of marks) {
+      const d = new Date(n.t).toLocaleDateString('fr-BE', { dateStyle: 'short' });
+      out.push(`### ${MARK_LABEL[n.mark!]} · ${pos(n)}`, '', n.text, '', `_Noté le ${d}_`, '');
+    }
   }
   return out.join('\n');
 }

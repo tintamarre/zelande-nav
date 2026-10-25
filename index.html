@@ -60,7 +60,7 @@
     <button id="track-btn" type="button" title="Trace" aria-label="Enregistrer la trace">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/></svg>
     </button>
-    <button id="note-btn" type="button" hidden title="Note de bord" aria-label="Ajouter une note de bord (heure et position)">
+    <button id="note-btn" type="button" title="Note ou repère" aria-label="Ajouter une note de bord ou un repère (heure et position)">
       <svg viewBox="0 0 24 24"><path d="M4 20l1-4L16 5l3 3L8 19z M14 7l3 3" fill="none"/></svg>
     </button>
     <button id="wind-btn" type="button" title="Vent" aria-label="Afficher ou masquer le vent" aria-pressed="false">
@@ -96,6 +96,7 @@
       <label>Anticipation alarme hauts-fonds (min) <input name="lookAheadMin" type="number" step="1" min="0" max="15" inputmode="numeric"></label>
       <h2>Couches</h2>
       <label class="check"><input name="soundings" type="checkbox"> Afficher les sondes</label>
+      <label class="check"><input name="marks" type="checkbox"> Afficher mes repères</label>
       <label class="check"><input name="night" type="checkbox"> Mode nuit</label>
       <menu><button value="close">Fermer</button></menu>
     </form>
@@ -120,21 +121,37 @@
       <p><button id="track-toggle" type="button">Démarrer l’enregistrement</button></p>
       <ul id="track-list"></ul>
       <h2>Journal de bord</h2>
-      <p class="small">Pendant l’enregistrement, le bouton ✎ note un événement avec l’heure et la position. Les notes sont aussi dans le GPX de leur trace.</p>
-      <p><button id="notes-txt" type="button">Journal (texte)</button> <button id="notes-gpx" type="button">Notes (GPX)</button></p>
+      <p class="small">Pendant l’enregistrement, le bouton ✎ note un événement avec l’heure et la position, visible sur la carte le temps de la trace. Les notes sont aussi dans le GPX de leur trace.</p>
+      <p><button id="notes-md" type="button">Journal (Markdown)</button> <button id="notes-gpx" type="button">Notes (GPX)</button> <button id="notes-clear" type="button" class="secondary">Tout effacer</button></p>
       <ul id="note-list"></ul>
+      <h2>Mes repères</h2>
+      <p class="small">Mouillages, dangers, infos : restent sur la carte. Bouton ✎, ou appui long sur la carte (clic droit sur ordinateur) pour en poser un à un endroit précis.</p>
+      <p><button id="marks-gpx" type="button">Repères (GPX)</button></p>
+      <ul id="mark-list"></ul>
       <menu><button value="close" class="secondary">Fermer</button></menu>
     </form>
   </dialog>
 
   <dialog id="note-dlg">
     <form method="dialog">
-      <h2>Note de bord</h2>
+      <h2 id="note-title">Note de bord</h2>
       <p class="small" id="note-where"></p>
-      <div class="chips" id="note-chips">
+      <div class="seg" id="note-kind" role="radiogroup" aria-label="Type de note">
+        <label><input type="radio" name="kind" value="" checked><span>Journal</span></label>
+        <label><input type="radio" name="kind" value="anchor"><span>⚓ Mouillage</span></label>
+        <label><input type="radio" name="kind" value="danger"><span>⚠ Danger</span></label>
+        <label><input type="radio" name="kind" value="info"><span>ⓘ Info</span></label>
+      </div>
+      <p class="small" id="note-kind-hint"></p>
+      <div class="chips" id="note-chips" data-for="log">
         <button type="button">Départ</button><button type="button">Arrivée</button><button type="button">Ris pris</button>
         <button type="button">Ris largué</button><button type="button">Moteur en route</button><button type="button">Moteur stoppé</button>
         <button type="button">Mouillage</button><button type="button">Amarré</button>
+      </div>
+      <div class="chips" id="mark-chips" data-for="mark" hidden>
+        <button type="button">Bonne tenue</button><button type="button">Fond sable</button><button type="button">Fond vase</button>
+        <button type="button">Abrité</button><button type="button">Haut-fond</button><button type="button">Roche</button>
+        <button type="button">Bouée manquante</button><button type="button">Ponton visiteurs</button>
       </div>
       <textarea id="note-text" rows="4" placeholder="Événement, météo, observation… (micro du clavier pour dicter)"></textarea>
       <menu>

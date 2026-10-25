@@ -1,6 +1,6 @@
 # Zélande Nav
 
-PWA de navigation à voile pour la Zélande (Pays-Bas) : cartes officielles gratuites Rijkswaterstaat (Inland ENC « Zeeland met Diepte », CC-0), position GPS, contour de sécurité, balisage, alarme hauts-fonds, trace GPX, journal de bord (notes horodatées et géolocalisées, export GPX et texte). Fonctionne **en ligne** (navigateur) et **hors-ligne** une fois installée sur le téléphone (« Ajouter à l'écran d'accueil »).
+PWA de navigation à voile pour la Zélande (Pays-Bas) : cartes officielles gratuites Rijkswaterstaat (Inland ENC « Zeeland met Diepte », CC-0), position GPS, contour de sécurité, balisage, alarme hauts-fonds, trace GPX, journal de bord (notes horodatées et géolocalisées, export GPX et Markdown), repères personnels (mouillage, danger, info) posés au GPS ou par appui long, partageables par lien. Fonctionne **en ligne** (navigateur) et **hors-ligne** une fois installée sur le téléphone (« Ajouter à l'écran d'accueil »).
 
 > Ne remplace pas une carte officielle à jour ni la vigilance du chef de bord.
 

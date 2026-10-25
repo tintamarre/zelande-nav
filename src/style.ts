@@ -258,9 +258,15 @@ export function buildStyle(s: Settings, sourceUrl: string, glyphsBase: string): 
     // --- bateau ---
     { id: 'track', type: 'line', source: 'track', paint: { 'line-color': P.track, 'line-width': 2, 'line-opacity': 0.8 } },
     // Notes de bord : pastilles numérotées (ordre chronologique du jour), toucher pour lire
-    { id: 'notes', type: 'circle', source: 'notes',
+    // Repères de l'utilisateur (mouillage, danger, info) : toujours affichés, nom à partir du zoom 12
+    { id: 'marks', type: 'symbol', source: 'notes', filter: ['has', 'mark'],
+      layout: { 'icon-image': ['concat', 'mark|', ['get', 'mark']], 'icon-anchor': 'bottom', 'icon-allow-overlap': true,
+        'text-field': ['step', ['zoom'], '', 12, ['get', 'name']], 'text-font': ['Noto Sans Medium'], 'text-size': 12,
+        'text-anchor': 'left', 'text-offset': [1, -1.3], 'text-optional': true, 'text-max-width': 12 },
+      paint: { 'icon-opacity': s.night ? 0.75 : 1, 'text-color': P.text, 'text-halo-color': P.halo, 'text-halo-width': 1.2 } },
+    { id: 'notes', type: 'circle', source: 'notes', filter: ['!', ['has', 'mark']],
       paint: { 'circle-radius': 9, 'circle-color': s.night ? '#8a6a00' : '#f2b705', 'circle-stroke-color': P.coast, 'circle-stroke-width': 1.5 } },
-    { id: 'notes-label', type: 'symbol', source: 'notes',
+    { id: 'notes-label', type: 'symbol', source: 'notes', filter: ['!', ['has', 'mark']],
       layout: { 'text-field': ['to-string', ['get', 'n']], 'text-font': ['Noto Sans Medium'], 'text-size': 11, 'text-allow-overlap': true },
       paint: { 'text-color': '#1a1a1a' } },
     { id: 'vector', type: 'line', source: 'boat', filter: ['==', ['geometry-type'], 'LineString'],
