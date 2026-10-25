@@ -15,7 +15,7 @@ import {
 } from './currents';
 import { registerSymbols } from './symbols';
 import {
-  MARK_LABEL, type MarkKind, type Note, type Track, type TrackPoint, deleteNote, deleteTrack, destination, firstLine, listNotes, listTracks,
+  MARK_LABEL, type MarkKind, type Note, type Track, type TrackPoint, deleteNotes, deleteTrack, destination, firstLine, listNotes, listTracks,
   notesGpx, notesMarkdown, notesOf, saveNote, saveTrack, shareFile, toGpx, trackNm,
 } from './track';
 
@@ -307,7 +307,6 @@ const QUERY_LAYERS = ['buoys', 'beacons', 'lights', 'topmar', 'dangers', 'notmrk
   'cblohd', 'clearance', 'ofsplf', 'areas', 'tsezne', 'soundg', 'soundg-drying', 'covr', 'depare', 'unsare'];
 
 map.on('click', (e) => {
-  if (pressed) { pressed = false; return; } // fin d'un appui long : le dialogue du repère est déjà ouvert
   const r = 12;
   // Note ou repère touché : son texte et ses actions, pas les objets de la carte dessous
   const mine = ['marks', 'notes'].filter((l) => map.getLayer(l));
@@ -638,7 +637,7 @@ async function refreshTracks() {
       await deleteTrack(t.id);
       const own = notesOf(t, logs());
       if (own.length && confirm(`Supprimer aussi ${own.length > 1 ? `les ${own.length} notes` : 'la note'} de cette trace ? Les repères restent.`)) {
-        for (const n of own) await deleteNote(n.id);
+        await deleteNotes(own.map((n) => n.id));
         refreshNotes();
       }
       refreshTracks();
@@ -662,7 +661,8 @@ const marks = () => notes.filter((n) => n.mark);
 const fileSafe = (s: string) => s.replace(/[^\w-]+/g, '_');
 const fmtNoteTime = (t: number) => new Date(t).toLocaleString('fr-BE', { dateStyle: 'short', timeStyle: 'short' });
 const MARK_ICON: Record<MarkKind, string> = { anchor: '⚓', danger: '⚠', info: 'ⓘ' };
-const noteTitle = (n: Note) => (n.mark ? `${MARK_ICON[n.mark]} ${MARK_LABEL[n.mark]}` : 'Note de bord');
+const markTitle = (k: MarkKind | undefined) => (k ? `${MARK_ICON[k]} ${MARK_LABEL[k]}` : 'Note de bord');
+const confirmDelete = (n: Note) => confirm(n.mark ? 'Supprimer ce repère ?' : 'Supprimer cette note ?');
 
 function renderNotes() {
   const src = map.getSource('notes') as GeoJSONSource | undefined;
@@ -683,7 +683,7 @@ function renderNotes() {
 
 function noteItem(n: Note, onOpen?: () => void): HTMLLIElement {
   const li = document.createElement('li');
-  const head = n.mark ? `${MARK_ICON[n.mark]} ${MARK_LABEL[n.mark]} · ` : '';
+  const head = n.mark ? `${markTitle(n.mark)} · ` : '';
   li.innerHTML = `<span><small>${esc(head + fmtNoteTime(n.t))}${n.approx ? ' · position approx.' : ''}</small><br>${esc(n.text)}</span>`;
   const actions = document.createElement('span');
   if (onOpen) {
@@ -692,7 +692,7 @@ function noteItem(n: Note, onOpen?: () => void): HTMLLIElement {
     actions.append(see, ' ');
   }
   const del = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Suppr.', className: 'secondary' });
-  del.onclick = async () => { if (confirm(n.mark ? 'Supprimer ce repère ?' : 'Supprimer cette note ?')) { await deleteNote(n.id); refreshNotes(); } };
+  del.onclick = async () => { if (confirmDelete(n)) { await deleteNotes([n.id]); refreshNotes(); } };
   actions.append(del);
   li.append(actions);
   return li;
@@ -701,43 +701,49 @@ function noteItem(n: Note, onOpen?: () => void): HTMLLIElement {
 async function refreshNotes() {
   notes = await listNotes();
   renderNotes();
+  const l = logs(), m = marks();
   const list = $('note-list');
-  list.innerHTML = '';
-  for (const n of logs().reverse()) list.append(noteItem(n));
-  if (!logs().length) list.innerHTML = '<li><small>Aucune note.</small></li>';
-  for (const id of ['notes-md', 'notes-gpx', 'notes-clear']) $<HTMLButtonElement>(id).disabled = !logs().length;
+  list.innerHTML = l.length ? '' : '<li><small>Aucune note.</small></li>';
+  for (const n of l.reverse()) list.append(noteItem(n));
+  for (const id of ['notes-gpx', 'notes-clear']) $<HTMLButtonElement>(id).disabled = !l.length;
+  $<HTMLButtonElement>('notes-md').disabled = !notes.length; // le Markdown contient aussi les repères
   const mlist = $('mark-list');
-  mlist.innerHTML = '';
-  for (const n of marks().reverse()) {
+  mlist.innerHTML = m.length ? '' : '<li><small>Aucun repère.</small></li>';
+  for (const n of m.reverse()) {
     mlist.append(noteItem(n, () => {
       $<HTMLDialogElement>('track-dlg').close();
       map.flyTo({ center: [n.lon, n.lat], zoom: Math.max(map.getZoom(), 14) });
       notePopup(n);
     }));
   }
-  if (!marks().length) mlist.innerHTML = '<li><small>Aucun repère.</small></li>';
-  $<HTMLButtonElement>('marks-gpx').disabled = !marks().length;
+  $<HTMLButtonElement>('marks-gpx').disabled = !m.length;
 }
 
-/** Popup d'une note ou d'un repère, avec ses actions. */
-function notePopup(n: Note, num?: number) {
-  const title = n.mark ? noteTitle(n) : `Note${num ? ` ${num}` : ''} · ${fmtNoteTime(n.t)}`;
+/** Popup d'une note : titre, position et heure, texte, puis boutons (data-a = action). */
+function popupAt(lat: number, lon: number, title: string, sub: string, text: string, buttons: string) {
   const el = document.createElement('div');
   el.className = 'ident';
-  el.innerHTML = `<h3>${esc(title)}</h3><small>${esc(formatLatLon(n.lat, n.lon))}${n.mark ? ` · ${esc(fmtNoteTime(n.t))}` : ''}</small>
-    <p class="note-text">${esc(n.text)}</p>
-    <menu><button type="button" data-a="share">Partager</button><button type="button" data-a="edit">Modifier</button>${n.mark ? '' : '<button type="button" data-a="keep">Garder sur la carte</button>'}<button type="button" data-a="del">Supprimer</button></menu>`;
-  const popup = new maplibregl.Popup({ maxWidth: '300px' }).setLngLat([n.lon, n.lat]).setDOMContent(el).addTo(map);
-  for (const b of el.querySelectorAll<HTMLButtonElement>('button[data-a]')) {
-    b.onclick = async () => {
-      const a = b.dataset.a;
-      if (a === 'share') return shareNote(n);
-      popup.remove();
-      if (a === 'edit') openNote(n, n.mark ?? '');
-      else if (a === 'keep') openNote(n, 'info');
-      else if (a === 'del' && confirm(n.mark ? 'Supprimer ce repère ?' : 'Supprimer cette note ?')) { await deleteNote(n.id); refreshNotes(); }
-    };
-  }
+  el.innerHTML = `<h3>${esc(title)}</h3><small>${esc(sub)}</small><p class="note-text">${esc(text)}</p><menu>${buttons}</menu>`;
+  const popup = new maplibregl.Popup({ maxWidth: '300px' }).setLngLat([lon, lat]).setDOMContent(el).addTo(map);
+  return { popup, button: (a: string) => el.querySelector<HTMLButtonElement>(`button[data-a="${a}"]`) };
+}
+
+/** Popup d'une de mes notes ou d'un de mes repères, avec ses actions. */
+function notePopup(n: Note, num?: number) {
+  const title = n.mark ? markTitle(n.mark) : `Note${num ? ` ${num}` : ''} · ${fmtNoteTime(n.t)}`;
+  const sub = `${formatLatLon(n.lat, n.lon)}${n.mark ? ` · ${fmtNoteTime(n.t)}` : ''}`;
+  const { popup, button } = popupAt(n.lat, n.lon, title, sub, n.text,
+    `<button type="button" data-a="share">Partager</button><button type="button" data-a="edit">Modifier</button>${n.mark ? '' : '<button type="button" data-a="keep">Garder sur la carte</button>'}<button type="button" data-a="del">Supprimer</button>`);
+  button('share')!.onclick = () => shareNote(n);
+  button('edit')!.onclick = () => { popup.remove(); openNote(n, n.mark ?? ''); };
+  const keep = button('keep');
+  if (keep) keep.onclick = () => { popup.remove(); openNote(n, 'info'); };
+  button('del')!.onclick = async () => {
+    if (!confirmDelete(n)) return;
+    popup.remove();
+    await deleteNotes([n.id]);
+    refreshNotes();
+  };
 }
 
 // ---------- dialogue de saisie ----------
@@ -783,38 +789,52 @@ $('note-btn').onclick = () => {
     `${fmtNoteTime(now)} · ${formatLatLon(draft.lat, draft.lon)}${f ? '' : ' (centre de la carte : pas de position GPS)'}`);
 };
 
-/** Repère posé à un endroit choisi sur la carte (appui long, clic droit). */
-function noteAt(lngLat: maplibregl.LngLat) {
-  if ($<HTMLDialogElement>('note-dlg').open) return; // Android : appui long = minuterie + « contextmenu »
+/** Appui long ou clic droit à un point de l'écran : ouvre la note qui s'y trouve, sinon pose un nouveau repère. */
+function noteAt(point: maplibregl.Point) {
+  if ($<HTMLDialogElement>('note-dlg').open) return;
+  const r = 12;
+  const mine = ['marks', 'notes'].filter((l) => map.getLayer(l));
+  const hit = mine.length ? map.queryRenderedFeatures([[point.x - r, point.y - r], [point.x + r, point.y + r]], { layers: mine })[0] : undefined;
+  const existing = hit && notes.find((x) => x.id === hit.properties.id);
+  if (existing) { notePopup(existing, hit.properties.n as number | undefined); return; }
+  const ll = map.unproject(point);
   const now = Date.now();
-  draft = { id: now, t: now, lat: lngLat.lat, lon: lngLat.lng };
-  navigator.vibrate?.(20);
-  openNote(null, 'info', `Repère à ${formatLatLon(lngLat.lat, lngLat.lng)}`);
+  draft = { id: now, t: now, lat: ll.lat, lon: ll.lng };
+  openNote(null, 'info', `Repère à ${formatLatLon(ll.lat, ll.lng)}`);
 }
-map.on('contextmenu', (e) => { e.preventDefault(); noteAt(e.lngLat); });
-// iOS ne déclenche pas « contextmenu » au toucher : appui long d'un seul doigt, immobile, 600 ms
+// Souris : clic droit. Au toucher, Android envoie aussi « contextmenu » pendant l'appui : ignoré, l'appui long ci-dessous s'en charge.
+let touching = false;
+map.on('contextmenu', (e) => { e.preventDefault(); if (!touching) noteAt(e.point); });
+// Appui long d'un seul doigt, immobile : vibration à 600 ms, le dialogue s'ouvre au lever du doigt
+// (ouvert sous le doigt, le « click » du lever toucherait ses boutons)
 let mapPressTimer = 0;
 let pressed = false;
-let pressStart: { x: number; y: number } | null = null;
+let pressStart: maplibregl.Point | null = null;
 const canvasBox = map.getCanvasContainer();
-const cancelPress = () => { clearTimeout(mapPressTimer); pressStart = null; };
+const touchPoint = (t: Touch) => {
+  const r = canvasBox.getBoundingClientRect();
+  return new maplibregl.Point(t.clientX - r.left, t.clientY - r.top);
+};
+const cancelPress = () => { clearTimeout(mapPressTimer); pressStart = null; pressed = false; };
 canvasBox.addEventListener('touchstart', (e) => {
-  pressed = false;
+  touching = true;
   cancelPress();
   if (e.touches.length !== 1) return;
-  const r = canvasBox.getBoundingClientRect();
-  const p = { x: e.touches[0].clientX - r.left, y: e.touches[0].clientY - r.top };
-  pressStart = p;
-  mapPressTimer = window.setTimeout(() => { pressed = true; noteAt(map.unproject([p.x, p.y])); }, 600);
+  pressStart = touchPoint(e.touches[0]);
+  mapPressTimer = window.setTimeout(() => { pressed = true; navigator.vibrate?.(20); }, 600);
 }, { passive: true });
 canvasBox.addEventListener('touchmove', (e) => {
-  if (!pressStart) return;
-  const r = canvasBox.getBoundingClientRect();
-  const t = e.touches[0];
-  if (e.touches.length !== 1 || Math.hypot(t.clientX - r.left - pressStart.x, t.clientY - r.top - pressStart.y) > 10) cancelPress();
+  if (pressStart && (e.touches.length !== 1 || touchPoint(e.touches[0]).dist(pressStart) > 10)) cancelPress();
 }, { passive: true });
-canvasBox.addEventListener('touchend', cancelPress);
-canvasBox.addEventListener('touchcancel', cancelPress);
+canvasBox.addEventListener('touchend', (e) => {
+  touching = e.touches.length > 0;
+  const p = pressed && pressStart;
+  cancelPress();
+  if (!p) return;
+  e.preventDefault(); // pas de « click » : ni identification de la carte, ni bouton du dialogue
+  noteAt(p);
+});
+canvasBox.addEventListener('touchcancel', () => { touching = false; cancelPress(); });
 
 // Raccourcis : ajoutent le mot au texte (utilisables avec des gants)
 for (const b of document.querySelectorAll<HTMLButtonElement>('#note-chips button, #mark-chips button')) {
@@ -842,7 +862,7 @@ $('marks-gpx').onclick = () => shareFile(`reperes-${today()}.gpx`, notesGpx(mark
 $('notes-clear').onclick = async () => {
   const l = logs();
   if (!l.length || !confirm(`Effacer ${l.length > 1 ? `les ${l.length} notes` : 'la note'} du journal ? Les repères restent.`)) return;
-  for (const n of l) await deleteNote(n.id);
+  await deleteNotes(l.map((n) => n.id));
   refreshNotes();
 };
 
@@ -878,24 +898,25 @@ async function shareNote(n: Note) {
 /** Ouvre un lien partagé : carte centrée sur le point, texte, et proposition de l'ajouter à ses repères. */
 function openSharedNote() {
   const q = new URLSearchParams(location.hash.slice(1));
-  const [lat, lon] = (q.get('note') ?? '').split(',').map(Number);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return;
+  if (!q.has('note')) return;
   history.replaceState(null, '', location.pathname + location.search); // pas de nouvel ajout au rechargement
-  const type = q.get('type');
-  const kind = type && type in MARK_LABEL ? (type as MarkKind) : undefined;
+  const parts = (q.get('note') ?? '').split(',');
+  const [lat, lon] = parts.map((x) => (x.trim() ? Number(x) : NaN));
+  if (parts.length !== 2 || !Number.isFinite(lat) || !Number.isFinite(lon) || !map.getMaxBounds()?.contains([lon, lat])) {
+    toast('Lien de note invalide ou hors de la zone de la carte.');
+    return;
+  }
+  const type = q.get('type') ?? '';
+  const kind = Object.hasOwn(MARK_LABEL, type) ? (type as MarkKind) : undefined;
   const text = (q.get('text') ?? '').slice(0, 2000);
-  const t = Number(q.get('t')) || Date.now();
+  const t0 = Number(q.get('t'));
+  const t = Number.isFinite(t0) && t0 > 0 && t0 < 8.64e15 ? t0 : Date.now(); // sinon Date invalide (export GPX)
+  zoomOnFirstFix = false; // le premier fix GPS ne doit pas emporter la vue loin du point partagé
   map.jumpTo({ center: [lon, lat], zoom: Math.max(map.getZoom(), 14) });
-  const el = document.createElement('div');
-  el.className = 'ident';
-  el.innerHTML = `<h3>${esc(kind ? `${MARK_ICON[kind]} ${MARK_LABEL[kind]}` : 'Note de bord')}</h3>
-    <small>Reçu par lien · ${esc(formatLatLon(lat, lon))} · ${esc(fmtNoteTime(t))}</small>
-    <p class="note-text">${esc(text)}</p>
-    <menu><button type="button" class="primary">Ajouter à mes repères</button></menu>`;
-  const popup = new maplibregl.Popup({ maxWidth: '300px' }).setLngLat([lon, lat]).setDOMContent(el).addTo(map);
-  el.querySelector('button')!.onclick = async () => {
-    const id = Date.now();
-    await saveNote({ id, t, lat, lon, text: text || 'Repère partagé', mark: kind ?? 'info' });
+  const { popup, button } = popupAt(lat, lon, markTitle(kind), `Reçu par lien · ${formatLatLon(lat, lon)} · ${fmtNoteTime(t)}`, text,
+    '<button type="button" class="primary" data-a="add">Ajouter à mes repères</button>');
+  button('add')!.onclick = async () => {
+    await saveNote({ id: Date.now(), t, lat, lon, text: text || 'Repère partagé', mark: kind ?? 'info' });
     popup.remove();
     toast('Ajouté à vos repères');
     refreshNotes();
@@ -919,6 +940,7 @@ function fillSettings() {
   $('contour-out').textContent = `${safetyContour(settings).toLocaleString('fr-BE')} m`;
 }
 settingsForm.addEventListener('change', () => {
+  const prev = settings as unknown as Record<string, number | boolean>;
   const next = { ...settings } as Record<string, number | boolean>;
   for (const k of Object.keys(settings)) {
     const input = settingsForm.elements.namedItem(k) as HTMLInputElement | null;
@@ -929,6 +951,8 @@ settingsForm.addEventListener('change', () => {
   settings = next as unknown as Settings;
   saveSettings(settings);
   fillSettings();
+  // Repères affichés ou masqués : seules les données GeoJSON changent, pas le style de la carte
+  if (Object.keys(next).every((k) => k === 'marks' || next[k] === prev[k])) { renderNotes(); return; }
   applyStyle();
   if (boat.active && boat.last) map.once('idle', () => checkShallows(boat.last!));
 });

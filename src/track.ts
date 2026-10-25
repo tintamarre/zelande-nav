@@ -43,7 +43,10 @@ export const deleteTrack = (id: number) => tx('tracks', 'readwrite', (s) => s.de
 
 export const saveNote = (n: Note) => tx('notes', 'readwrite', (s) => s.put(n));
 export const listNotes = async () => (await tx<Note[]>('notes', 'readonly', (s) => s.getAll() as IDBRequest<Note[]>)).sort((a, b) => a.t - b.t);
-export const deleteNote = (id: number) => tx('notes', 'readwrite', (s) => s.delete(id));
+/** Une seule transaction : tout ou rien, même si la page est fermée pendant l'effacement. */
+export async function deleteNotes(ids: number[]) {
+  if (ids.length) await tx('notes', 'readwrite', (s) => ids.map((id) => s.delete(id)).at(-1)!);
+}
 
 /** Notes prises pendant la trace (de son premier à son dernier point). */
 export const notesOf = (t: Track, notes: Note[]) =>
